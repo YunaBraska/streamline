@@ -56,6 +56,24 @@ public class Example {
 }
 ```
 
+With custom thread pool:
+
+```java
+import berlin.yuna.streamline.model.StreamLine;
+
+import java.util.concurrent.ForkJoinPool;
+
+public class Example {
+    public static void main(final String[] args) {
+        final ForkJoinPool executor = new ForkJoinPool();
+        
+        StreamLine.of(executor, "one", "two", "three")
+            .threads(-1) // Use unlimited threads
+            .forEach(System.out::println);
+    }
+}
+```
+
 ### StreamLine Performance
 
 Each method is tested with 10 concurrent streams including 10 tasks for every stream.
