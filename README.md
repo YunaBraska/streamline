@@ -89,10 +89,11 @@ CPU cores: 10.
 | StreamLine \[2 Threads]   | 512ms |
 
 ### Limitations
-
+* StreamLine is not compatible with Java 8
+* StreamLine is mainly made for big data processing and not for small data
 * The concurrent processing does not extend to operations returning type-specific streams
   like `IntStream`, `LongStream`, `DoubleStream`, `OptionalInt`, `OptionalLong`, `OptionalDouble`, etc.
-* StreamLine has more Terminal operations than the usual java stream due its simple design
+* StreamLine has more terminal operations than the usual java stream due its simple design - not sure if this is an advantage or disadvantage ^^
 
 [build_shield]: https://github.com/YunaBraska/streamline/workflows/MVN_RELEASE/badge.svg
 
