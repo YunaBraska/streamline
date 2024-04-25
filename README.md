@@ -56,7 +56,7 @@ public class Example {
 }
 ```
 
-### Performance
+### StreamLine Performance
 
 Each method is tested with 10 concurrent streams including 10 tasks for every stream.
 CPU cores: 10.
@@ -67,8 +67,14 @@ CPU cores: 10.
 | Java Stream \[Sequential] | 1.86s |
 | Java Stream \[Parallel]   | 724ms |
 | StreamLine \[Ordered]     | 118ms |
-| StreamLine \[Unordered]   | 118ms |
+| StreamLine \[Unordered]   | 109ms |
 | StreamLine \[2 Threads]   | 512ms |
+
+### Limitations
+
+* The concurrent processing does not extend to operations returning type-specific streams
+  like `IntStream`, `LongStream`, `DoubleStream`, `OptionalInt`, `OptionalLong`, `OptionalDouble`, etc.
+* StreamLine has more Terminal operations than the usual java stream due its simple design
 
 [build_shield]: https://github.com/YunaBraska/streamline/workflows/MVN_RELEASE/badge.svg
 
