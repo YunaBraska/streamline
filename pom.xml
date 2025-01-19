@@ -6,7 +6,7 @@
 
     <groupId>berlin.yuna</groupId>
     <artifactId>streamline</artifactId>
-    <version>1.0.21</version>
+    <version>1.0.22</version>
     <packaging>jar</packaging>
 
     <name>streamline</name>
