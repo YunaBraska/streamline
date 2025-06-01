@@ -95,9 +95,9 @@ CPU cores: 10.
   like `IntStream`, `LongStream`, `DoubleStream`, `OptionalInt`, `OptionalLong`, `OptionalDouble`, etc.
 * StreamLine has more terminal operations than the usual java stream due its simple design - not sure if this is an advantage or disadvantage ^^
 
-[build_shield]: https://github.com/YunaBraska/streamline/workflows/MVN_RELEASE/badge.svg
+[build_shield]: https://github.com/YunaBraska/streamline/workflows/Daily/badge.svg
 
-[build_link]: https://github.com/YunaBraska/streamline/actions?query=workflow%3AMVN_RELEASE
+[build_link]: https://github.com/YunaBraska/streamline/actions?query=workflow%3Daily
 
 [maintainable_shield]: https://img.shields.io/codeclimate/maintainability/YunaBraska/streamline?style=flat-square
 
