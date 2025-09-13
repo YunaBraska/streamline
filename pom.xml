@@ -6,7 +6,7 @@
 
     <groupId>berlin.yuna</groupId>
     <artifactId>streamline</artifactId>
-    <version>2025.08.2200719</version>
+    <version>2025.09.2560710</version>
     <packaging>jar</packaging>
 
     <name>streamline</name>
@@ -52,7 +52,7 @@
         <jacoco-maven-plugin.version>0.8.13</jacoco-maven-plugin.version>
         <maven-javadoc-plugin.version>3.1.0</maven-javadoc-plugin.version>
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
-        <maven-surefire-plugin.version>3.5.3</maven-surefire-plugin.version>
+        <maven-surefire-plugin.version>3.5.4</maven-surefire-plugin.version>
         <central-publishing-maven-plugin.version>0.7.0</central-publishing-maven-plugin.version>
     </properties>
 
