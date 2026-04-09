@@ -1,137 +1,131 @@
 package berlin.yuna.streamline.model;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.*;
+import java.util.Arrays;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 @Execution(ExecutionMode.SAME_THREAD)
 class StreamLinePerformanceTest {
 
-    private static ExecutorService executorService;
-    static final int STREAM_SIZE = 10;
-    final static int TASK_SIZE = 10;
+    private static final int WARMUP_RUNS = 2;
+    private static final int MEASURED_RUNS = 5;
+    private static final int LIGHTWEIGHT_SIZE = 30_000;
+    private static final int BLOCKING_SIZE = 4_000;
 
-    @BeforeEach
-    void setUp() {
-        executorService = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("virtual-thread-", 0).factory());
+    @Test
+    void shouldReduceSchedulingOverheadWhenChunkingUnlimitedWork() {
+        final long perItemDuration = medianNanos(StreamLinePerformanceTest::runUnlimitedPerItemWorkload);
+        final long autoChunkDuration = medianNanos(StreamLinePerformanceTest::runUnlimitedAutoChunkWorkload);
+        final long explicitChunkDuration = medianNanos(StreamLinePerformanceTest::runUnlimitedExplicitChunkWorkload);
+
+        assertThat(autoChunkDuration).isLessThan(perItemDuration);
+        assertThat(explicitChunkDuration).isLessThan(perItemDuration);
     }
 
-    @AfterEach
-    void tearDown() {
-        executorService.shutdown();
-        try {
-            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
-                executorService.shutdownNow();
-            }
-        } catch (final InterruptedException e) {
-            executorService.shutdownNow();
+    @Test
+    void shouldStayCompetitiveForBlockingWorkloadsWhenChunkingBoundedWorkers() {
+        final long perItemDuration = medianNanos(() -> runBlockingWorkload(1));
+        final long chunkedDuration = medianNanos(() -> runBlockingWorkload(16));
+
+        assertThat(chunkedDuration).isLessThanOrEqualTo((long) (perItemDuration * 1.25));
+    }
+
+    @Test
+    void shouldCompareBlockingWorkloadAgainstJavaStreamsAndStreamLine() {
+        final long sequentialDuration = medianNanos(StreamLinePerformanceTest::runSequentialBlockingWorkload);
+        final long parallelDuration = medianNanos(StreamLinePerformanceTest::runParallelBlockingWorkload);
+        final long streamLineDuration = medianNanos(StreamLinePerformanceTest::runStreamLineBlockingWorkload);
+
+        assertThat(parallelDuration)
+            .withFailMessage("Expected parallel stream to beat sequential stream for the blocking workload, but sequential=%d ns parallel=%d ns streamLine=%d ns", sequentialDuration, parallelDuration, streamLineDuration)
+            .isLessThan(sequentialDuration);
+        assertThat(streamLineDuration)
+            .withFailMessage("Expected StreamLine to stay at least competitive with java parallel stream for the blocking workload, but sequential=%d ns parallel=%d ns streamLine=%d ns", sequentialDuration, parallelDuration, streamLineDuration)
+            .isLessThanOrEqualTo((long) (parallelDuration * 1.10));
+        assertThat(streamLineDuration)
+            .withFailMessage("Expected StreamLine to beat java sequential stream for the blocking workload, but sequential=%d ns parallel=%d ns streamLine=%d ns", sequentialDuration, parallelDuration, streamLineDuration)
+            .isLessThan(sequentialDuration);
+    }
+
+    private static void runUnlimitedPerItemWorkload() {
+        assertThat(StreamLine.range(0, LIGHTWEIGHT_SIZE)
+            .threads(-1)
+            .chunks(1)
+            .map(value -> value + 1)
+            .toList()).hasSize(LIGHTWEIGHT_SIZE);
+    }
+
+    private static void runUnlimitedAutoChunkWorkload() {
+        assertThat(StreamLine.range(0, LIGHTWEIGHT_SIZE)
+            .threads(-1)
+            .chunks(-1)
+            .map(value -> value + 1)
+            .toList()).hasSize(LIGHTWEIGHT_SIZE);
+    }
+
+    private static void runUnlimitedExplicitChunkWorkload() {
+        assertThat(StreamLine.range(0, LIGHTWEIGHT_SIZE)
+            .threads(-1)
+            .chunks(64)
+            .map(value -> value + 1)
+            .toList()).hasSize(LIGHTWEIGHT_SIZE);
+    }
+
+    private static void runBlockingWorkload(final int chunkSize) {
+        assertThat(StreamLine.range(0, BLOCKING_SIZE)
+            .threads(8)
+            .chunks(chunkSize)
+            .map(StreamLinePerformanceTest::blockingOperation)
+            .toList()).hasSize(BLOCKING_SIZE);
+    }
+
+    private static void runSequentialBlockingWorkload() {
+        assertThat(IntStream.range(0, BLOCKING_SIZE)
+            .map(StreamLinePerformanceTest::blockingOperation)
+            .boxed()
+            .toList()).hasSize(BLOCKING_SIZE);
+    }
+
+    private static void runParallelBlockingWorkload() {
+        assertThat(IntStream.range(0, BLOCKING_SIZE)
+            .parallel()
+            .map(StreamLinePerformanceTest::blockingOperation)
+            .boxed()
+            .toList()).hasSize(BLOCKING_SIZE);
+    }
+
+    private static void runStreamLineBlockingWorkload() {
+        assertThat(StreamLine.range(0, BLOCKING_SIZE)
+            .threads(-1)
+            .chunks(-1)
+            .map(StreamLinePerformanceTest::blockingOperation)
+            .toList()).hasSize(BLOCKING_SIZE);
+    }
+
+    private static int blockingOperation(final int value) {
+        LockSupport.parkNanos(TimeUnit.MICROSECONDS.toNanos(100));
+        return value;
+    }
+
+    private static long medianNanos(final Runnable workload) {
+        for (int run = 0; run < WARMUP_RUNS; run++) {
+            workload.run();
         }
-    }
 
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("testArguments")
-    void performanceTest(final String testName, final ExRunnable task) throws Exception {
-        task.run();
-    }
-
-    static Stream<Arguments> testArguments() {
-        return Stream.of(
-            Arguments.of("Loop [for]", (ExRunnable) StreamLinePerformanceTest::testNoStream),
-            Arguments.of(Stream.class.getSimpleName() + " [Sequential]", (ExRunnable) StreamLinePerformanceTest::testStream),
-            Arguments.of(Stream.class.getSimpleName() + "Stream [Parallel]", (ExRunnable) StreamLinePerformanceTest::testParallelStream),
-            Arguments.of(StreamLine.class.getSimpleName() + " [Ordered]", (ExRunnable) StreamLinePerformanceTest::testStreamLine_with_order),
-            Arguments.of(StreamLine.class.getSimpleName() + " [Unordered]", (ExRunnable) StreamLinePerformanceTest::testStreamLine_without_order),
-            Arguments.of(StreamLine.class.getSimpleName() + " [2 Threads]", (ExRunnable) StreamLinePerformanceTest::testStreamLine_with_twoThreads)
-        );
-    }
-
-    static void testStreamLine_without_order() throws InterruptedException {
-        final List<Callable<Object>> tasks = new ArrayList<>();
-        for (int i = 0; i < TASK_SIZE; i++) {
-            tasks.add(Executors.callable(() -> {
-                StreamLine.range(executorService, 0, STREAM_SIZE).map(StreamLinePerformanceTest::slowProcessing).toArray();
-            }));
+        final long[] durations = new long[MEASURED_RUNS];
+        for (int run = 0; run < MEASURED_RUNS; run++) {
+            final long start = System.nanoTime();
+            workload.run();
+            durations[run] = System.nanoTime() - start;
         }
-
-        final List<Future<Object>> futures = executorService.invokeAll(tasks);
-        assertTrue(futures.stream().allMatch(Future::isDone), "All tasks should complete successfully");
-    }
-
-    static void testStreamLine_with_order() throws InterruptedException {
-        final List<Callable<Object>> tasks = new ArrayList<>();
-        for (int i = 0; i < TASK_SIZE; i++) {
-            tasks.add(Executors.callable(() -> {
-                StreamLine.range(executorService, 0, STREAM_SIZE).ordered(true).map(StreamLinePerformanceTest::slowProcessing).toArray();
-            }));
-        }
-
-        assertTrue(executorService.invokeAll(tasks).stream().allMatch(Future::isDone), "All tasks should complete successfully");
-    }
-
-    static void testStreamLine_with_twoThreads() throws InterruptedException {
-        final List<Callable<Object>> tasks = new ArrayList<>();
-        for (int i = 0; i < TASK_SIZE; i++) {
-            tasks.add(Executors.callable(() -> {
-                StreamLine.range(executorService, 0, STREAM_SIZE).threads(2).map(StreamLinePerformanceTest::slowProcessing).toArray();
-            }));
-        }
-
-        assertTrue(executorService.invokeAll(tasks).stream().allMatch(Future::isDone), "All tasks should complete successfully");
-    }
-
-    static void testStream() throws InterruptedException {
-        final List<Callable<Object>> tasks = new ArrayList<>();
-        for (int i = 0; i < TASK_SIZE; i++) {
-            tasks.add(Executors.callable(() -> {
-                IntStream.range(0, STREAM_SIZE).boxed().map(StreamLinePerformanceTest::slowProcessing).toArray();
-            }));
-        }
-
-        assertTrue(executorService.invokeAll(tasks).stream().allMatch(Future::isDone), "All tasks should complete successfully");
-    }
-
-    static void testParallelStream() throws InterruptedException {
-        final List<Callable<Object>> tasks = new ArrayList<>();
-        for (int i = 0; i < TASK_SIZE; i++) {
-            tasks.add(Executors.callable(() -> {
-                IntStream.range(0, STREAM_SIZE).parallel().boxed().map(StreamLinePerformanceTest::slowProcessing).toArray();
-            }));
-        }
-
-        assertTrue(executorService.invokeAll(tasks).stream().allMatch(Future::isDone), "All tasks should complete successfully");
-    }
-
-    static void testNoStream() throws InterruptedException {
-        final List<Callable<Object>> tasks = new ArrayList<>();
-        for (int i = 0; i < TASK_SIZE; i++) {
-            tasks.add(Executors.callable(() -> {
-                for (int j = 0; j < STREAM_SIZE; j++) {
-                    slowProcessing(j);
-                }
-            }));
-        }
-
-        assertTrue(executorService.invokeAll(tasks).stream().allMatch(Future::isDone), "All tasks should complete successfully");
-    }
-
-    private static long slowProcessing(final int n) {
-        try {
-            Thread.sleep(100); // Simulate a delay in processing
-        } catch (final InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        return System.currentTimeMillis();
+        Arrays.sort(durations);
+        return durations[MEASURED_RUNS / 2];
     }
 }
