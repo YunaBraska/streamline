@@ -171,19 +171,20 @@ public class Example {
 
 ### When StreamLine Helps
 
-| Workload                                                  | Java Stream \[A]             | Java Parallel Stream \[B]            | StreamLine \[C]     | Current Median Result                               |
-|-----------------------------------------------------------|------------------------------|--------------------------------------|---------------------|-----------------------------------------------------|
-| Small in-memory CPU-only mapping                          | Usually best                 | Often slightly worse than sequential | Usually unnecessary | **A `0.29 ms`**<br>B `2.21 ms`<br>C `9.25 ms`       |
-| Blocking I/O per element                                  | Usually slow                 | Good while the common pool is free   | Strong fit          | A `496.68 ms`<br>B `52.16 ms`<br>**C `14.44 ms`**   |
-| Many concurrent pipelines (`commonPoolParallelism() * 4`) | Often steadier than parallel | Can self-contend on the shared pool  | Strong fit          | A `124.55 ms`<br>B `456.91 ms`<br>**C `21.31 ms`**  |
-| Custom executor isolation                                 | No                           | No                                   | Yes                 | Only StreamLine lets you isolate the work           |
-| Tunable worker count and batching                         | No                           | No                                   | Yes                 | `threads(n)` and `chunks(n)` let you shape the load |
+| Workload                                                  | Java Stream \[A]             | Java Parallel Stream \[B]            | StreamLine \[C]                     | Current Median Result                               |
+|-----------------------------------------------------------|------------------------------|--------------------------------------|-------------------------------------|-----------------------------------------------------|
+| Small in-memory CPU-only mapping                          | Usually best                 | Often slightly worse than sequential | Usually unnecessary                 | **A `0.32 ms`**<br>B `0.67 ms`<br>C `3.92 ms`       |
+| Blocking I/O per element                                  | Usually slow                 | Good while the common pool is free   | Strong fit                          | A `469.41 ms`<br>B `52.35 ms`<br>**C `13.99 ms`**   |
+| Many concurrent pipelines (`commonPoolParallelism() * 4`) | Often steadier than parallel | Can self-contend on the shared pool  | Strong fit                          | A `127.66 ms`<br>B `457.71 ms`<br>**C `20.82 ms`**  |
+| Custom executor isolation                                 | No                           | No                                   | Yes                                 | Only StreamLine lets you isolate the work           |
+| Tunable worker count and batching                         | No                           | No                                   | Yes                                 | `threads(n)` and `chunks(n)` let you shape the load |
 
 ### Performance Notes
 
 - `threads(n)` controls concurrency.
 - `chunks(n)` controls batching.
 - Small collections with very cheap lambdas are often faster with plain loops or standard sequential streams.
+- Scalar terminals like `count()` and numeric reductions now run without materializing the full terminal result first.
 - StreamLine becomes more useful when every element does meaningful work and scheduling overhead is not the dominant
   cost.
 - The main value proposition is not "faster than Java streams in every benchmark". The real win is avoiding the shared
@@ -204,6 +205,7 @@ mvn -q -Dtest=StreamLineBenchmarkTest -Dstreamline.benchmark=true test
 The printed report includes:
 
 - a cheap CPU-only single-stream case where plain Java usually wins
+- a cheap scalar terminal case that shows the fused `count()` path
 - a blocking single-stream case where StreamLine should shine
 - a core-scaled concurrent common-pool case that reflects the "many pipelines on a small server" problem
 

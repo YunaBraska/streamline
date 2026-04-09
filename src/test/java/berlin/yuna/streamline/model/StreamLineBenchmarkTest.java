@@ -45,6 +45,13 @@ class StreamLineBenchmarkTest {
                 "Cheap CPU-only mapping. Plain Java usually wins."
             ),
             new BenchmarkRow(
+                "Cheap scalar count",
+                medianNanos(StreamLineBenchmarkTest::runCountSequentialWorkload),
+                medianNanos(StreamLineBenchmarkTest::runCountParallelWorkload),
+                medianNanos(StreamLineBenchmarkTest::runCountStreamLineWorkload),
+                "Fused scalar terminal without materializing terminal results."
+            ),
+            new BenchmarkRow(
                 "Blocking single stream",
                 medianNanos(StreamLineBenchmarkTest::runBlockingSequentialWorkload),
                 medianNanos(StreamLineBenchmarkTest::runBlockingParallelWorkload),
@@ -91,6 +98,23 @@ class StreamLineBenchmarkTest {
 
     private static void runCheapStreamLineWorkload() {
         assertThat(StreamLine.range(0, CHEAP_SIZE).threads(-1).chunks(-1).map(value -> value + 1).toList()).hasSize(CHEAP_SIZE);
+    }
+
+    private static void runCountSequentialWorkload() {
+        assertThat(IntStream.range(0, CHEAP_SIZE).map(value -> value + 1).filter(value -> value % 2 == 0).count()).isEqualTo(CHEAP_SIZE / 2L);
+    }
+
+    private static void runCountParallelWorkload() {
+        assertThat(IntStream.range(0, CHEAP_SIZE).parallel().map(value -> value + 1).filter(value -> value % 2 == 0).count()).isEqualTo(CHEAP_SIZE / 2L);
+    }
+
+    private static void runCountStreamLineWorkload() {
+        assertThat(StreamLine.range(0, CHEAP_SIZE)
+            .threads(-1)
+            .chunks(-1)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .count()).isEqualTo(CHEAP_SIZE / 2L);
     }
 
     private static void runBlockingSequentialWorkload() {

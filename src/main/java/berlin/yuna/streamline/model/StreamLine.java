@@ -736,16 +736,14 @@ public class StreamLine<T> implements Stream<T> {
 
     @Override
     public <R> R collect(final Supplier<R> supplier, final BiConsumer<R, ? super T> accumulator, final BiConsumer<R, R> combiner) {
-        final R[] results = Arrays.stream(executeTerminal()).map(item -> {
-            final R container = supplier.get();
-            accumulator.accept(container, item);
-            return container;
-        }).toArray(size -> (R[]) new Object[size]);
-        final R resultContainer = supplier.get();
-        for (final R result : results) {
-            combiner.accept(resultContainer, result);
-        }
-        return resultContainer;
+        return reduceSource(
+            supplier,
+            (container, item) -> accumulator.accept(container, (T) item),
+            (left, right) -> {
+                combiner.accept(left, right);
+                return left;
+            }
+        );
     }
 
     /**
@@ -759,10 +757,11 @@ public class StreamLine<T> implements Stream<T> {
 
     @Override
     public <R, A> R collect(final Collector<? super T, A, R> collector) {
-        final A resultContainer = collector.supplier().get();
-        for (final T item : executeTerminal()) {
-            collector.accumulator().accept(resultContainer, item);
-        }
+        final A resultContainer = reduceSource(
+            collector.supplier(),
+            (container, item) -> collector.accumulator().accept(container, (T) item),
+            collector.combiner()
+        );
         return collector.finisher().apply(resultContainer);
     }
 
@@ -782,7 +781,7 @@ public class StreamLine<T> implements Stream<T> {
      * @return the numeric sum, or {@code 0} when no numeric values are present
      */
     public double sum() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).sum();
+        return numericStatisticsOfSource().getSum();
     }
 
     /**
@@ -791,7 +790,8 @@ public class StreamLine<T> implements Stream<T> {
      * @return the maximum numeric value when present
      */
     public OptionalDouble max() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).max();
+        final DoubleSummaryStatistics statistics = numericStatisticsOfSource();
+        return statistics.getCount() < 1 ? OptionalDouble.empty() : OptionalDouble.of(statistics.getMax());
     }
 
     /**
@@ -800,7 +800,8 @@ public class StreamLine<T> implements Stream<T> {
      * @return the minimum numeric value when present
      */
     public OptionalDouble min() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).min();
+        final DoubleSummaryStatistics statistics = numericStatisticsOfSource();
+        return statistics.getCount() < 1 ? OptionalDouble.empty() : OptionalDouble.of(statistics.getMin());
     }
 
     /**
@@ -809,7 +810,8 @@ public class StreamLine<T> implements Stream<T> {
      * @return the numeric average when present
      */
     public OptionalDouble average() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).average();
+        final DoubleSummaryStatistics statistics = numericStatisticsOfSource();
+        return statistics.getCount() < 1 ? OptionalDouble.empty() : OptionalDouble.of(statistics.getAverage());
     }
 
     /**
@@ -818,12 +820,19 @@ public class StreamLine<T> implements Stream<T> {
      * @return numeric summary statistics for the terminal result
      */
     public DoubleSummaryStatistics statistics() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).summaryStatistics();
+        return numericStatisticsOfSource();
     }
 
     @Override
     public long count() {
-        return executeTerminal().length;
+        return reduceSource(
+            () -> new long[1],
+            (result, item) -> result[0]++,
+            (left, right) -> {
+                left[0] += right[0];
+                return left;
+            }
+        )[0];
     }
 
     /**
@@ -838,9 +847,16 @@ public class StreamLine<T> implements Stream<T> {
     public boolean anyMatch(final Predicate<? super T> predicate) {
         final AtomicBoolean result = new AtomicBoolean(false);
         final AtomicBoolean terminate = new AtomicBoolean(false);
-        forEachAsync(terminate, executeTerminal(), (index, value) -> {
-            if (value != null && predicate.test((T) value) && !result.getAndSet(true)) {
-                terminate.set(true);
+        forEachChunkAsync(terminate, source.length, (chunkIndex, startInclusive, endExclusive) -> {
+            for (int index = startInclusive; index < endExclusive; index++) {
+                if (shouldTerminate(terminate)) {
+                    return;
+                }
+                final Object value = applyOperations(source[index]);
+                if (value != null && predicate.test((T) value) && !result.getAndSet(true)) {
+                    terminate.set(true);
+                    return;
+                }
             }
         });
         return result.get();
@@ -858,9 +874,16 @@ public class StreamLine<T> implements Stream<T> {
     public boolean allMatch(final Predicate<? super T> predicate) {
         final AtomicBoolean result = new AtomicBoolean(true);
         final AtomicBoolean terminate = new AtomicBoolean(false);
-        forEachAsync(terminate, executeTerminal(), (index, value) -> {
-            if (value != null && !predicate.test((T) value) && result.getAndSet(false)) {
-                terminate.set(true);
+        forEachChunkAsync(terminate, source.length, (chunkIndex, startInclusive, endExclusive) -> {
+            for (int index = startInclusive; index < endExclusive; index++) {
+                if (shouldTerminate(terminate)) {
+                    return;
+                }
+                final Object value = applyOperations(source[index]);
+                if (value != null && !predicate.test((T) value) && result.getAndSet(false)) {
+                    terminate.set(true);
+                    return;
+                }
             }
         });
         return result.get();
@@ -880,55 +903,110 @@ public class StreamLine<T> implements Stream<T> {
     }
 
     private <I> void forEachAsync(final AtomicBoolean terminate, final I[] values, final IndexedConsumer<I> runnable) {
-        final int chunkSize = resolveChunkSize(values.length);
-        final int chunkCount = values.length < 1 ? 0 : ceilDiv(values.length, chunkSize);
-        final int workerCount = resolveWorkerCount(values.length);
+        forEachChunkAsync(terminate, values.length, (chunkIndex, startInclusive, endExclusive) ->
+            runChunk(terminate, values, startInclusive, endExclusive, runnable)
+        );
+    }
+
+    private void forEachChunkAsync(final AtomicBoolean terminate, final int valueCount, final ChunkConsumer consumer) {
+        final int chunkSize = resolveChunkSize(valueCount);
+        final int chunkCount = valueCount < 1 ? 0 : ceilDiv(valueCount, chunkSize);
+        final int workerCount = resolveWorkerCount(valueCount);
         if (workerCount < 1) {
             return;
         }
 
-        if (shouldInlineAutoWork(values.length)) {
-            runChunk(terminate, values, 0, values.length, runnable);
+        if (shouldInlineAutoWork(valueCount)) {
+            consumer.accept(0, 0, valueCount);
             return;
         }
 
         if (workerCount == 1) {
-            runChunk(terminate, values, 0, values.length, runnable);
+            consumer.accept(0, 0, valueCount);
             return;
         }
 
-        final int firstChunkEnd = shouldRunCallerChunk(values.length, chunkSize) ? Math.min(chunkSize, values.length) : 0;
+        final int firstChunkEnd = shouldRunCallerChunk(valueCount, chunkSize) ? Math.min(chunkSize, valueCount) : 0;
         if (firstChunkEnd > 0) {
-            runChunk(terminate, values, 0, firstChunkEnd, runnable);
-            if (shouldTerminate(terminate) || firstChunkEnd >= values.length) {
+            consumer.accept(0, 0, firstChunkEnd);
+            if (shouldTerminate(terminate) || firstChunkEnd >= valueCount) {
                 return;
             }
         }
 
         if (threads < 0) {
             final List<Future<?>> futures = new ArrayList<>(chunkCount);
-            for (int startInclusive = firstChunkEnd; startInclusive < values.length; startInclusive += chunkSize) {
-                final int chunkStart = startInclusive;
-                futures.add(executor.submit(() -> runChunk(terminate, values, chunkStart, Math.min(chunkStart + chunkSize, values.length), runnable)));
+            for (int chunkIndex = firstChunkEnd / chunkSize; chunkIndex < chunkCount; chunkIndex++) {
+                final int currentChunkIndex = chunkIndex;
+                final int startInclusive = currentChunkIndex * chunkSize;
+                futures.add(executor.submit(() -> consumer.accept(
+                    currentChunkIndex,
+                    startInclusive,
+                    Math.min(startInclusive + chunkSize, valueCount)
+                )));
             }
             waitFor(futures);
             return;
         }
 
-        final AtomicInteger nextIndex = new AtomicInteger(firstChunkEnd);
+        final AtomicInteger nextChunkIndex = new AtomicInteger(firstChunkEnd / chunkSize);
         final List<Future<?>> futures = new ArrayList<>(workerCount);
         for (int worker = 0; worker < workerCount; worker++) {
             futures.add(executor.submit(() -> {
                 while (!shouldTerminate(terminate)) {
-                    final int startInclusive = nextIndex.getAndAdd(chunkSize);
-                    if (startInclusive >= values.length) {
+                    final int chunkIndex = nextChunkIndex.getAndIncrement();
+                    final int startInclusive = chunkIndex * chunkSize;
+                    if (startInclusive >= valueCount) {
                         return;
                     }
-                    runChunk(terminate, values, startInclusive, Math.min(startInclusive + chunkSize, values.length), runnable);
+                    consumer.accept(chunkIndex, startInclusive, Math.min(startInclusive + chunkSize, valueCount));
                 }
             }));
         }
         waitFor(futures);
+    }
+
+    private <R> R reduceSource(final Supplier<R> supplier, final BiConsumer<R, Object> accumulator, final BinaryOperator<R> combiner) {
+        final int valueCount = source.length;
+        if (valueCount < 1) {
+            return supplier.get();
+        }
+
+        final int chunkCount = ceilDiv(valueCount, resolveChunkSize(valueCount));
+        final Object[] partialResults = new Object[chunkCount];
+        forEachChunkAsync(null, valueCount, (chunkIndex, startInclusive, endExclusive) -> {
+            final R partialResult = supplier.get();
+            for (int index = startInclusive; index < endExclusive; index++) {
+                final Object result = applyOperations(source[index]);
+                if (result != null) {
+                    accumulator.accept(partialResult, result);
+                }
+            }
+            partialResults[chunkIndex] = partialResult;
+        });
+
+        R result = supplier.get();
+        for (final Object partialResult : partialResults) {
+            if (partialResult != null) {
+                result = combiner.apply(result, (R) partialResult);
+            }
+        }
+        return result;
+    }
+
+    private DoubleSummaryStatistics numericStatisticsOfSource() {
+        return reduceSource(
+            DoubleSummaryStatistics::new,
+            (statistics, item) -> {
+                if (item instanceof Number number) {
+                    statistics.accept(number.doubleValue());
+                }
+            },
+            (left, right) -> {
+                left.combine(right);
+                return left;
+            }
+        );
     }
 
     /**
@@ -1125,5 +1203,10 @@ public class StreamLine<T> implements Stream<T> {
     @FunctionalInterface
     private interface IndexedConsumer<I> {
         void accept(int index, I value);
+    }
+
+    @FunctionalInterface
+    private interface ChunkConsumer {
+        void accept(int chunkIndex, int startInclusive, int endExclusive);
     }
 }

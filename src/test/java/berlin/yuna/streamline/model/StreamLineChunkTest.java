@@ -6,7 +6,9 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.ArrayList;
+import java.util.DoubleSummaryStatistics;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -19,6 +21,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class StreamLineChunkTest {
 
@@ -94,6 +97,133 @@ class StreamLineChunkTest {
     }
 
     @Test
+    void shouldPreserveEncounterOrderWhenCollectingChunkLocals() {
+        final List<Integer> result = StreamLine.range(0, 12)
+            .threads(4)
+            .chunks(2)
+            .map(value -> value + 1)
+            .collect(ArrayList::new, List::add, List::addAll);
+
+        assertThat(result).containsExactlyElementsOf(IntStream.rangeClosed(1, 12).boxed().toList());
+    }
+
+    @Test
+    void shouldSupportFusedScalarTerminalsAcrossChunkedWorkers() {
+        final long count = StreamLine.range(0, 32)
+            .threads(4)
+            .chunks(3)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .count();
+
+        final DoubleSummaryStatistics statistics = StreamLine.range(0, 32)
+            .threads(4)
+            .chunks(3)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .statistics();
+
+        assertThat(count).isEqualTo(16);
+        assertThat(statistics.getCount()).isEqualTo(16);
+        assertThat(statistics.getSum()).isEqualTo(272);
+        assertThat(statistics.getAverage()).isEqualTo(17);
+    }
+
+    @Test
+    void shouldHandleEmptyResultsForFusedTerminals() {
+        final List<Integer> emptyCollected = StreamLine.<Integer>of().threads(4).chunks(3).collect(ArrayList::new, List::add, List::addAll);
+
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).count()).isZero();
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).sum()).isZero();
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).average()).isEmpty();
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).statistics().getCount()).isZero();
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).collect(Collectors.toList())).isEmpty();
+        assertThat(emptyCollected).isEmpty();
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).findFirst()).isEmpty();
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).findAny()).isEmpty();
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).anyMatch(value -> true)).isFalse();
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).allMatch(value -> false)).isTrue();
+        assertThat(StreamLine.<Integer>of().threads(4).chunks(3).noneMatch(value -> true)).isTrue();
+    }
+
+    @Test
+    void shouldPropagateExceptionsFromFusedOperations() {
+        assertThatThrownBy(() -> StreamLine.range(0, 12)
+            .threads(4)
+            .chunks(3)
+            .map(value -> {
+                if (value == 5) {
+                    throw new IllegalArgumentException("map failure");
+                }
+                return value;
+            })
+            .count())
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("map failure");
+
+        assertThatThrownBy(() -> StreamLine.range(0, 12)
+            .threads(4)
+            .chunks(3)
+            .filter(value -> {
+                if (value == 7) {
+                    throw new IllegalStateException("filter failure");
+                }
+                return true;
+            })
+            .statistics())
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("filter failure");
+    }
+
+    @Test
+    void shouldPropagateExceptionsFromFusedCollectors() {
+        assertThatThrownBy(() -> StreamLine.range(0, 12)
+            .threads(4)
+            .chunks(3)
+            .collect(ArrayList::new, (result, value) -> {
+                if (value == 5) {
+                    throw new IllegalArgumentException("accumulator failure");
+                }
+                result.add(value);
+            }, List::addAll))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("accumulator failure");
+
+        assertThatThrownBy(() -> StreamLine.range(0, 12)
+            .threads(4)
+            .chunks(3)
+            .collect(ConcurrentHashMap<Integer, Integer>::new, (result, value) -> result.put(value, value), (left, right) -> {
+                if (!right.isEmpty()) {
+                    throw new IllegalStateException("combiner failure");
+                }
+            }))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("combiner failure");
+    }
+
+    @Test
+    void shouldPreserveFusedTerminalResultsAcrossRepeatedInvocations() {
+        final StreamLine<Integer> stream = StreamLine.range(0, 24)
+            .threads(4)
+            .chunks(3)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0);
+
+        final List<Integer> expected = IntStream.range(0, 24)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .boxed()
+            .toList();
+
+        assertThat(stream.count()).isEqualTo(expected.size());
+        assertThat(stream.count()).isEqualTo(expected.size());
+        assertThat(stream.collect(Collectors.toList())).containsExactlyElementsOf(expected);
+        assertThat(stream.collect(Collectors.toList())).containsExactlyElementsOf(expected);
+        assertThat(stream.statistics().getSum()).isEqualTo(expected.stream().mapToInt(Integer::intValue).sum());
+        assertThat(stream.statistics().getSum()).isEqualTo(expected.stream().mapToInt(Integer::intValue).sum());
+    }
+
+    @Test
     void shouldPreserveChunkConfigurationAcrossDerivedStreams() {
         final StreamLine<Integer> stream = (StreamLine<Integer>) StreamLine.of(5, 4, 3, 2, 1)
             .threads(3)
@@ -133,6 +263,24 @@ class StreamLineChunkTest {
         final ExecutorService executor = Executors.newFixedThreadPool(6);
         try {
             assertConfigurationMatrix(executor, threads, chunks);
+        } finally {
+            executor.shutdown();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @ParameterizedTest(name = "fused terminals default executor threads={0} chunks={1}")
+    @MethodSource("configurationArguments")
+    void shouldSupportFusedTerminalMatrixWithDefaultExecutor(final int threads, final int chunks) {
+        assertFusedTerminalMatrix(null, threads, chunks);
+    }
+
+    @ParameterizedTest(name = "fused terminals custom executor threads={0} chunks={1}")
+    @MethodSource("configurationArguments")
+    void shouldSupportFusedTerminalMatrixWithCustomExecutor(final int threads, final int chunks) throws Exception {
+        final ExecutorService executor = Executors.newFixedThreadPool(6);
+        try {
+            assertFusedTerminalMatrix(executor, threads, chunks);
         } finally {
             executor.shutdown();
             assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
@@ -192,6 +340,57 @@ class StreamLineChunkTest {
             .unordered()
             .toList();
         assertThat(unordered).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    private void assertFusedTerminalMatrix(final ExecutorService executor, final int threads, final int chunks) {
+        final List<Integer> expected = IntStream.range(0, 24)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .boxed()
+            .toList();
+        final double expectedSum = expected.stream().mapToInt(Integer::intValue).sum();
+
+        assertThat(createRange(executor, 24)
+            .threads(threads)
+            .chunks(chunks)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .count()).isEqualTo(expected.size());
+
+        final DoubleSummaryStatistics statistics = createRange(executor, 24)
+            .threads(threads)
+            .chunks(chunks)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .statistics();
+        assertThat(statistics.getCount()).isEqualTo(expected.size());
+        assertThat(statistics.getSum()).isEqualTo(expectedSum);
+        assertThat(statistics.getMin()).isEqualTo(2);
+        assertThat(statistics.getMax()).isEqualTo(24);
+
+        final List<Integer> collected = createRange(executor, 24)
+            .threads(threads)
+            .chunks(chunks)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .collect(Collectors.toList());
+        assertThat(collected).containsExactlyElementsOf(expected);
+
+        final List<Integer> unorderedCollected = createRange(executor, 24)
+            .threads(threads)
+            .chunks(chunks)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .unordered()
+            .collect(ArrayList::new, List::add, List::addAll);
+        assertThat(unorderedCollected).containsExactlyInAnyOrderElementsOf(expected);
+
+        final Map<Boolean, List<Integer>> grouped = createRange(executor, 24)
+            .threads(threads)
+            .chunks(chunks)
+            .map(value -> value + 1)
+            .collect(Collectors.groupingBy(value -> value % 2 == 0));
+        assertThat(grouped.get(true)).containsExactlyElementsOf(expected);
     }
 
     private static Stream<Arguments> configurationArguments() {

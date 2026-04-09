@@ -54,6 +54,16 @@ class StreamLinePerformanceTest {
             .isLessThan(sequentialDuration);
     }
 
+    @Test
+    void shouldReduceScalarTerminalOverheadWhenUsingFusedCount() {
+        final long materializedDuration = medianNanos(StreamLinePerformanceTest::runMaterializedCountWorkload);
+        final long fusedDuration = medianNanos(StreamLinePerformanceTest::runFusedCountWorkload);
+
+        assertThat(fusedDuration)
+            .withFailMessage("Expected fused count to beat the materialized equivalent, but materialized=%d ns fused=%d ns", materializedDuration, fusedDuration)
+            .isLessThan(materializedDuration);
+    }
+
     private static void runUnlimitedPerItemWorkload() {
         assertThat(StreamLine.range(0, LIGHTWEIGHT_SIZE)
             .threads(-1)
@@ -84,6 +94,24 @@ class StreamLinePerformanceTest {
             .chunks(chunkSize)
             .map(StreamLinePerformanceTest::blockingOperation)
             .toList()).hasSize(BLOCKING_SIZE);
+    }
+
+    private static void runMaterializedCountWorkload() {
+        assertThat(StreamLine.range(0, LIGHTWEIGHT_SIZE)
+            .threads(-1)
+            .chunks(-1)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .toList()).hasSize(LIGHTWEIGHT_SIZE / 2);
+    }
+
+    private static void runFusedCountWorkload() {
+        assertThat(StreamLine.range(0, LIGHTWEIGHT_SIZE)
+            .threads(-1)
+            .chunks(-1)
+            .map(value -> value + 1)
+            .filter(value -> value % 2 == 0)
+            .count()).isEqualTo(LIGHTWEIGHT_SIZE / 2);
     }
 
     private static void runSequentialBlockingWorkload() {
