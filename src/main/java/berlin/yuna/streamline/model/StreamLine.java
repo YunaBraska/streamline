@@ -4,59 +4,67 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.*;
 import java.util.stream.*;
 
 /**
- * {@link StreamLine} provides a simplified, high-performance Stream API utilizing exchangeable {@link ExecutorService},
- * with a focus on leveraging<code>Project Loom</code>'s virtual and non-blocking threads for efficient concurrent processing ({@link StreamLine#VIRTUAL_EXECUTOR}).
- * Unlike the default {@link Stream#parallel()}, {@link StreamLine} is optimized for multithreaded environments showcasing superior performance with a design that avoids the common pitfalls of resource management in stream operations.
- * <p><u><b>Usage Example:</b><u/>
+ * {@link StreamLine} provides a concurrent Stream API backed by an exchangeable {@link ExecutorService}.
+ * By default it uses {@link #VIRTUAL_EXECUTOR}, but callers can provide their own executor when they need separate
+ * scheduling or stricter resource isolation.
+ * <p><b>Scheduling controls:</b></p>
+ * <ul>
+ *     <li>{@link #threads(int)} controls how many workers may run concurrently.</li>
+ *     <li>{@link #chunks(int)} controls how many items a worker drains before claiming more work.</li>
+ *     <li>Negative values normalize to {@code -1}, which enables automatic scheduling instead of failing.</li>
+ * </ul>
+ * <p><b>Usage example:</b></p>
  * <pre>
- * {@link StreamLine}.of("one", "two", "three")
- *           .threads(-1) // unlimited threads
- *           .forEach(System.out::println);
+ * {@link StreamLine}.range(0, 100)
+ *     .threads(8)
+ *     .chunks(16)
+ *     .map(value -> value * 2)
+ *     .toList();
  * </pre>
- * </p><p><u><b>Performance and Scalability:</b><u/>
- * {@link StreamLine} outperforms standard Java {@link Stream} in concurrent scenarios:
- * Tested 10 Concurrent Streams with 10 Tasks each (10 Cores CPU).
+ * <p><b>Additional methods:</b></p>
  * <ul>
- *     <li>Loop [for]: 1.86s</li>
- *     <li>{@link Stream} [Sequential]: 1.29s</li>
- *     <li>{@link Stream}  [Parallel]: 724ms</li>
- *     <li>{@link StreamLine}  [Ordered]: 118ms</li>
- *     <li>{@link StreamLine}  [Unordered]: 109ms</li>
- *     <li>{@link StreamLine}  [2 Threads]: 500ms</li>
+ *     <li>{@link #range(int, int)} mirrors {@link IntStream#range(int, int)}.</li>
+ *     <li>{@link #count()}, {@link #sum()}, {@link #max()}, {@link #min()}, {@link #average()}, and
+ *     {@link #statistics()} cover common numeric terminal operations.</li>
+ *     <li>{@link #forEach(BiConsumer)}, {@link #forEachSync(BiConsumer)}, and
+ *     {@link #forEachOrdered(BiConsumer)} expose the terminal index together with each value.</li>
  * </ul>
- * </p><p><u><b>Additional Methods:</b><u/>
- * {@link StreamLine} comes with additional methods out of the box to avoid performance loss at {@link IntStream}, {@link LongStream} and {@link DoubleStream}
- * <ul>
- *     <li>{@link StreamLine#range(int, int)}: same as {@link IntStream#range(int, int)}</li>
- *     <li>{@link StreamLine#count()}: same as {@link IntStream#count()}</li>
- *     <li>{@link StreamLine#sum()}: same as {@link IntStream#sum()}</li>
- *     <li>{@link StreamLine#max()}: same as {@link IntStream#max()}</li>
- *     <li>{@link StreamLine#min()}: same as {@link IntStream#min()}</li>
- *     <li>{@link StreamLine#average()}: same as {@link IntStream#average()}</li>
- *     <li>{@link StreamLine#statistics()}: same as {@link IntStream#summaryStatistics()}</li>
- * </ul>
- * </p><p><u><b>Note on Concurrency:</b><u/>
- * Be mindful when handling functions like {@link Stream#forEach(Consumer)}; This function calls the consumer concurrently.
- * This behaviour is the same as in {@link Stream#parallel()} but its more noticeable due to the performance of {@link StreamLine}.
- * </p><p><u><b>Limitations:</b><u/>
- * The concurrent processing does not extend to operations returning type-specific streams like {@link IntStream}, {@link LongStream}, {@link DoubleStream}, {@link OptionalInt}, {@link OptionalLong}, {@link OptionalDouble}, etc.
- * {@link StreamLine} has more <a href="package-summary.html#StreamOps">Terminal operations</a> due its simple design
- * </p>
+ * <p><b>Subclassing note:</b></p>
+ * <p>Subclasses can override {@link #newStream(Object[])} to preserve their derived type across terminal pipeline
+ * boundaries such as {@link #sorted()} or {@link #limit(long)}.</p>
+ * <p><b>Concurrency note:</b></p>
+ * <p>The indexed position provided by the indexed terminal operations is the position within the terminal result for
+ * that invocation, not necessarily the original source position before filtering or sorting.</p>
+ * <p><b>Limitations:</b></p>
+ * <p>The concurrent processing does not extend to operations returning type-specific streams like {@link IntStream},
+ * {@link LongStream}, {@link DoubleStream}, {@link OptionalInt}, {@link OptionalLong}, and
+ * {@link OptionalDouble}.</p>
  *
  * @param <T> the type of the stream elements
  */
 @SuppressWarnings({"unchecked", "java:S1905"}) // Suppress SonarLint warning about casting to T
 public class StreamLine<T> implements Stream<T> {
+    private static final int AUTO_CONFIG = -1;
+    private static final int DEFAULT_CUSTOM_EXECUTOR_THREADS = 10;
+    private static final int AUTO_CHUNKS_PER_BOUNDED_WORKER = 4;
+    private static final int AUTO_CHUNKS_PER_UNLIMITED_WORKER = 8;
+    private static final int MIN_INLINE_THRESHOLD = 64;
+    private static final int MAX_INLINE_THRESHOLD = 512;
     private final T[] source;
     private final ExecutorService executor;
     private final List<Function<Object, Object>> operations = new ArrayList<>();
     private boolean ordered = true;
     private int threads;
+    private int chunks = AUTO_CONFIG;
     private Runnable closeHandler;
+    /**
+     * Default virtual-thread executor used when callers do not provide a custom executor.
+     */
     public static final ExecutorService VIRTUAL_EXECUTOR = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("virtual-thread-", 0).factory());
 
     /**
@@ -68,12 +76,13 @@ public class StreamLine<T> implements Stream<T> {
     public StreamLine(final ExecutorService executor, final T... values) {
         this.source = values;
         this.executor = executor != null ? executor : VIRTUAL_EXECUTOR;
-        threads = executor == null ? Math.max(2, Runtime.getRuntime().availableProcessors() / 2) : 10;
+        threads = executor == null ? Math.max(2, Runtime.getRuntime().availableProcessors() / 2) : DEFAULT_CUSTOM_EXECUTOR_THREADS;
     }
 
     /**
      * Creates a {@link StreamLine}. from given elements.
      *
+     * @param <T> the type of the stream elements
      * @param values The elements to include in the new stream.
      * @return A new {@link StreamLine}.
      */
@@ -84,6 +93,7 @@ public class StreamLine<T> implements Stream<T> {
     /**
      * Creates a {@link StreamLine}. from given elements and a custom executor.
      *
+     * @param <T> the type of the stream elements
      * @param executor [Optional] The executor for parallel processing.
      * @param values   The elements to include in the new stream.
      * @return A new {@link StreamLine}..
@@ -95,6 +105,7 @@ public class StreamLine<T> implements Stream<T> {
     /**
      * Creates a {@link StreamLine}. from a single element.
      *
+     * @param <T> the type of the stream elements
      * @param value The single element to create the stream from.
      * @return A new {@link StreamLine}..
      */
@@ -105,6 +116,7 @@ public class StreamLine<T> implements Stream<T> {
     /**
      * Creates a {@link StreamLine}. from a single element with a custom executor.
      *
+     * @param <T> the type of the stream elements
      * @param executor [Optional] The executor for parallel processing.
      * @param value    The single element to create the stream from.
      * @return A new {@link StreamLine}..
@@ -172,23 +184,48 @@ public class StreamLine<T> implements Stream<T> {
     }
 
     /**
-     * Gets the limit of threads available for parallel processing. -1 all available executor threads.
+     * Gets the worker limit available for parallel processing.
+     * {@code -1} enables automatic worker scheduling.
      *
-     * @return The number of threads.
+     * @return the worker configuration
      */
     public int threads() {
         return threads;
     }
 
     /**
-     * Sets the limit of threads for parallel processing. -1 all available executor threads.
+     * Sets the worker limit for parallel processing.
+     * Negative values normalize to {@code -1}, which enables automatic worker scheduling.
      * <a href="package-summary.html#StreamOps">Intermediate operation</a>
      *
-     * @param threads The number of threads to use.
-     * @return The current {@link StreamLine}..
+     * @param threads the number of workers to use
+     * @return the current {@link StreamLine}
      */
     public StreamLine<T> threads(final int threads) {
-        this.threads = threads == 0 ? 1 : threads;
+        this.threads = threads < 0 ? AUTO_CONFIG : Math.max(1, threads);
+        return this;
+    }
+
+    /**
+     * Gets the chunk size configuration used when workers claim work.
+     * {@code -1} enables automatic chunk sizing.
+     *
+     * @return the chunk size configuration
+     */
+    public int chunks() {
+        return chunks;
+    }
+
+    /**
+     * Sets the chunk size for parallel processing.
+     * Negative values normalize to {@code -1}, which enables automatic chunk sizing.
+     * <a href="package-summary.html#StreamOps">Intermediate operation</a>
+     *
+     * @param chunks the chunk size to use
+     * @return the current {@link StreamLine}
+     */
+    public StreamLine<T> chunks(final int chunks) {
+        this.chunks = chunks < 0 ? AUTO_CONFIG : Math.max(1, chunks);
         return this;
     }
 
@@ -209,9 +246,9 @@ public class StreamLine<T> implements Stream<T> {
      * @return A stream consisting of the results of applying the given function.
      */
     @Override
-    public <R> Stream<R> map(final Function<? super T, ? extends R> mapper) {
+    public <R> StreamLine<R> map(final Function<? super T, ? extends R> mapper) {
         operations.add((Function<Object, Object>) mapper);
-        return (Stream<R>) this;
+        return (StreamLine<R>) this;
     }
 
     /**
@@ -259,16 +296,16 @@ public class StreamLine<T> implements Stream<T> {
     /**
      * Transforms each element into zero or more elements by applying a function to each element.
      * <p><a href="package-summary.html#StreamOps">Terminal operation</a></p>.
-     * Differs from {@link Stream#map(Function)} which is <a href="package-summary.html#StreamOps">Intermediate operation</a></p>.
+     * Differs from {@link Stream#map(Function)} which is an <a href="package-summary.html#StreamOps">intermediate operation</a>.
      * This closes the streams as soon as possible to keep things simple and continue with clean multi thread operations.
      *
      * @param mapper A function to apply to each element, which returns a stream of new values.
      * @return A new stream consisting of all elements produced by applying the function to each element.
      */
     @Override
-    public <R> Stream<R> flatMap(final Function<? super T, ? extends Stream<? extends R>> mapper) {
+    public <R> StreamLine<R> flatMap(final Function<? super T, ? extends Stream<? extends R>> mapper) {
         operations.add(item -> mapper.apply((T) item));
-        return (Stream<R>) StreamLine.of(executor, Arrays.stream(executeTerminal()).flatMap(item -> (Stream<R>) item).toArray()).ordered(ordered).threads(threads);
+        return newStream(Arrays.stream(executeTerminal()).flatMap(item -> (Stream<R>) item).toArray(size -> (R[]) new Object[size]));
     }
 
     /**
@@ -320,7 +357,7 @@ public class StreamLine<T> implements Stream<T> {
      * @return A stream consisting of the distinct elements of this stream.
      */
     @Override
-    public Stream<T> distinct() {
+    public StreamLine<T> distinct() {
         final Set<T> seen = ConcurrentHashMap.newKeySet();
         operations.add(item -> seen.add((T) item) ? item : null);
         return this;
@@ -333,7 +370,7 @@ public class StreamLine<T> implements Stream<T> {
      * @return A stream consisting of the sorted elements of this stream.
      */
     @Override
-    public Stream<T> sorted() {
+    public StreamLine<T> sorted() {
         return sorted(null);
     }
 
@@ -345,10 +382,10 @@ public class StreamLine<T> implements Stream<T> {
      * @return A new stream consisting of the sorted elements of this stream.
      */
     @Override
-    public Stream<T> sorted(final Comparator<? super T> comparator) {
+    public StreamLine<T> sorted(final Comparator<? super T> comparator) {
         final T[] values = executeTerminal();
         Arrays.sort(values, comparator);
-        return StreamLine.of(executor, values).ordered(ordered).threads(threads);
+        return newStream(values);
     }
 
     /**
@@ -359,7 +396,7 @@ public class StreamLine<T> implements Stream<T> {
      * @return A stream consisting of the elements after applying the given action.
      */
     @Override
-    public Stream<T> peek(final Consumer<? super T> action) {
+    public StreamLine<T> peek(final Consumer<? super T> action) {
         operations.add(item -> {
             action.accept((T) item);
             return item;
@@ -375,9 +412,9 @@ public class StreamLine<T> implements Stream<T> {
      * @return A new stream consisting of the elements of this stream, truncated to maxSize in length.
      */
     @Override
-    public Stream<T> limit(final long maxSize) {
+    public StreamLine<T> limit(final long maxSize) {
         final T[] values = executeTerminal();
-        return maxSize < 1 || maxSize > values.length ? this : new StreamLine<>(executor, Arrays.copyOfRange(values, 0, (int) Math.min(maxSize, values.length))).ordered(ordered).threads(threads);
+        return maxSize < 1 || maxSize > values.length ? this : newStream(Arrays.copyOfRange(values, 0, (int) Math.min(maxSize, values.length)));
     }
 
     /**
@@ -388,9 +425,9 @@ public class StreamLine<T> implements Stream<T> {
      * @return A new stream consisting of the remaining elements of this stream after skipping the first n elements.
      */
     @Override
-    public Stream<T> skip(final long n) {
+    public StreamLine<T> skip(final long n) {
         final T[] values = executeTerminal();
-        return n < 1 ? this : new StreamLine<>(executor, Arrays.copyOfRange(values, (int) Math.min(n, values.length), values.length)).ordered(ordered).threads(threads);
+        return n < 1 ? this : newStream(Arrays.copyOfRange(values, (int) Math.min(n, values.length), values.length));
     }
 
     /**
@@ -401,7 +438,7 @@ public class StreamLine<T> implements Stream<T> {
      * @return A stream consisting of the elements of this stream that match the given predicate.
      */
     @Override
-    public Stream<T> filter(final Predicate<? super T> predicate) {
+    public StreamLine<T> filter(final Predicate<? super T> predicate) {
         operations.add(item -> predicate.test((T) item) ? item : null);
         return this;
     }
@@ -462,7 +499,7 @@ public class StreamLine<T> implements Stream<T> {
      * @return A sequential Stream.
      */
     @Override
-    public Stream<T> sequential() {
+    public StreamLine<T> sequential() {
         threads(1);
         return this;
     }
@@ -475,7 +512,7 @@ public class StreamLine<T> implements Stream<T> {
      * @return A possibly parallel Stream.
      */
     @Override
-    public Stream<T> parallel() {
+    public StreamLine<T> parallel() {
         return threads == 1 ? this.threads(2) : this;
     }
 
@@ -486,7 +523,7 @@ public class StreamLine<T> implements Stream<T> {
      * @return An unordered Stream.
      */
     @Override
-    public Stream<T> unordered() {return this.ordered(false);}
+    public StreamLine<T> unordered() {return this.ordered(false);}
 
     /**
      * Returns the same stream with a close handler attached.
@@ -496,7 +533,7 @@ public class StreamLine<T> implements Stream<T> {
      * @return The same Stream with a close handler attached.
      */
     @Override
-    public Stream<T> onClose(final Runnable closeHandler) {
+    public StreamLine<T> onClose(final Runnable closeHandler) {
         this.closeHandler = closeHandler;
         return this;
     }
@@ -529,6 +566,7 @@ public class StreamLine<T> implements Stream<T> {
      * <p><a href="package-summary.html#StreamOps">Terminal operation</a></p>.
      * <ul>
      * <li><b>forEach(Consumer):</b> Asynchronous, Concurrently, Unordered, No Thread Safety</li>
+     * <li><b>{@link StreamLine#forEach(BiConsumer)}:</b> Asynchronous, Concurrently, Unordered, No Thread Safety, exposes terminal index</li>
      * <li><b>{@link StreamLine#forEachSync(Consumer)}:</b> Synchronous, Unordered, Thread Safe</li>
      * <li><b>{@link StreamLine#forEachOrdered(Consumer)}:</b> Synchronous, Ordered, Thread Safe</li>
      * </ul>
@@ -537,11 +575,23 @@ public class StreamLine<T> implements Stream<T> {
      */
     @Override
     public void forEach(final Consumer<? super T> action) {
-        forEachAsync(null, executeTerminal(false, false), pair -> action.accept(pair.getValue()));
+        forEachAsync(null, executeTerminal(false, false), (index, value) -> action.accept(value));
     }
 
     /**
-     * Performs an action for each element <u><b>synchronously</u></b>
+     * Performs an action for each terminal result <u><b>concurrently</b></u>, without regard to encounter order,
+     * while also exposing the terminal index for that invocation.
+     * This method does not guarantee thread safety; users must ensure that the provided action is thread-safe.
+     * <p><a href="package-summary.html#StreamOps">Terminal operation</a></p>.
+     *
+     * @param action a non-interfering action receiving terminal index and value
+     */
+    public void forEach(final BiConsumer<Integer, ? super T> action) {
+        forEachAsync(null, executeTerminal(false, false), action::accept);
+    }
+
+    /**
+     * Performs an action for each element <u><b>synchronously</b></u>.
      * It is required to take care of thread safety in the action.
      * <p><a href="package-summary.html#StreamOps">Terminal operation</a></p>.
      * <ul>
@@ -555,6 +605,19 @@ public class StreamLine<T> implements Stream<T> {
     public void forEachSync(final Consumer<? super T> action) {
         for (final T item : executeTerminal()) {
             action.accept(item);
+        }
+    }
+
+    /**
+     * Performs an action for each element <u><b>synchronously</b></u> while also exposing the terminal index for that invocation.
+     * <p><a href="package-summary.html#StreamOps">Terminal operation</a></p>.
+     *
+     * @param action a non-interfering action receiving terminal index and value
+     */
+    public void forEachSync(final BiConsumer<Integer, ? super T> action) {
+        final T[] values = executeTerminal();
+        for (int index = 0; index < values.length; index++) {
+            action.accept(index, values[index]);
         }
     }
 
@@ -573,6 +636,19 @@ public class StreamLine<T> implements Stream<T> {
     public void forEachOrdered(final Consumer<? super T> action) {
         for (final T item : executeTerminal(true, false)) {
             action.accept(item);
+        }
+    }
+
+    /**
+     * Performs a synchronous action for each element of this stream, preserving encounter order and exposing the terminal index.
+     * <p><a href="package-summary.html#StreamOps">Terminal operation</a></p>.
+     *
+     * @param action a non-interfering action receiving terminal index and value
+     */
+    public void forEachOrdered(final BiConsumer<Integer, ? super T> action) {
+        final T[] values = executeTerminal(true, false);
+        for (int index = 0; index < values.length; index++) {
+            action.accept(index, values[index]);
         }
     }
 
@@ -660,16 +736,14 @@ public class StreamLine<T> implements Stream<T> {
 
     @Override
     public <R> R collect(final Supplier<R> supplier, final BiConsumer<R, ? super T> accumulator, final BiConsumer<R, R> combiner) {
-        final R[] results = Arrays.stream(executeTerminal()).map(item -> {
-            final R container = supplier.get();
-            accumulator.accept(container, item);
-            return container;
-        }).toArray(size -> (R[]) new Object[size]);
-        final R resultContainer = supplier.get();
-        for (final R result : results) {
-            combiner.accept(resultContainer, result);
-        }
-        return resultContainer;
+        return reduceSource(
+            supplier,
+            (container, item) -> accumulator.accept(container, (T) item),
+            (left, right) -> {
+                combiner.accept(left, right);
+                return left;
+            }
+        );
     }
 
     /**
@@ -683,11 +757,11 @@ public class StreamLine<T> implements Stream<T> {
 
     @Override
     public <R, A> R collect(final Collector<? super T, A, R> collector) {
-        final A resultContainer = collector.supplier().get();
-        executeTerminal();
-        for (final T item : executeTerminal()) {
-            collector.accumulator().accept(resultContainer, item);
-        }
+        final A resultContainer = reduceSource(
+            collector.supplier(),
+            (container, item) -> collector.accumulator().accept(container, (T) item),
+            collector.combiner()
+        );
         return collector.finisher().apply(resultContainer);
     }
 
@@ -701,29 +775,64 @@ public class StreamLine<T> implements Stream<T> {
         return reduce(BinaryOperator.maxBy(comparator));
     }
 
+    /**
+     * Sums all numeric terminal results and ignores non-numeric values.
+     *
+     * @return the numeric sum, or {@code 0} when no numeric values are present
+     */
     public double sum() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).sum();
+        return numericStatisticsOfSource().getSum();
     }
 
+    /**
+     * Finds the maximum numeric terminal result and ignores non-numeric values.
+     *
+     * @return the maximum numeric value when present
+     */
     public OptionalDouble max() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).max();
+        final DoubleSummaryStatistics statistics = numericStatisticsOfSource();
+        return statistics.getCount() < 1 ? OptionalDouble.empty() : OptionalDouble.of(statistics.getMax());
     }
 
+    /**
+     * Finds the minimum numeric terminal result and ignores non-numeric values.
+     *
+     * @return the minimum numeric value when present
+     */
     public OptionalDouble min() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).min();
+        final DoubleSummaryStatistics statistics = numericStatisticsOfSource();
+        return statistics.getCount() < 1 ? OptionalDouble.empty() : OptionalDouble.of(statistics.getMin());
     }
 
+    /**
+     * Calculates the average of all numeric terminal results and ignores non-numeric values.
+     *
+     * @return the numeric average when present
+     */
     public OptionalDouble average() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).average();
+        final DoubleSummaryStatistics statistics = numericStatisticsOfSource();
+        return statistics.getCount() < 1 ? OptionalDouble.empty() : OptionalDouble.of(statistics.getAverage());
     }
 
+    /**
+     * Calculates summary statistics for all numeric terminal results and ignores non-numeric values.
+     *
+     * @return numeric summary statistics for the terminal result
+     */
     public DoubleSummaryStatistics statistics() {
-        return Arrays.stream(executeTerminal()).filter(Number.class::isInstance).map(Number.class::cast).mapToDouble(Number::doubleValue).summaryStatistics();
+        return numericStatisticsOfSource();
     }
 
     @Override
     public long count() {
-        return executeTerminal().length;
+        return reduceSource(
+            () -> new long[1],
+            (result, item) -> result[0]++,
+            (left, right) -> {
+                left[0] += right[0];
+                return left;
+            }
+        )[0];
     }
 
     /**
@@ -738,9 +847,16 @@ public class StreamLine<T> implements Stream<T> {
     public boolean anyMatch(final Predicate<? super T> predicate) {
         final AtomicBoolean result = new AtomicBoolean(false);
         final AtomicBoolean terminate = new AtomicBoolean(false);
-        forEachAsync(terminate, executeTerminal(), item -> {
-            if (item.getValue() != null && predicate.test((T) item.getValue()) && !result.getAndSet(true)) {
-                terminate.set(true);
+        forEachChunkAsync(terminate, source.length, (chunkIndex, startInclusive, endExclusive) -> {
+            for (int index = startInclusive; index < endExclusive; index++) {
+                if (shouldTerminate(terminate)) {
+                    return;
+                }
+                final Object value = applyOperations(source[index]);
+                if (value != null && predicate.test((T) value) && !result.getAndSet(true)) {
+                    terminate.set(true);
+                    return;
+                }
             }
         });
         return result.get();
@@ -758,9 +874,16 @@ public class StreamLine<T> implements Stream<T> {
     public boolean allMatch(final Predicate<? super T> predicate) {
         final AtomicBoolean result = new AtomicBoolean(true);
         final AtomicBoolean terminate = new AtomicBoolean(false);
-        forEachAsync(terminate, executeTerminal(), item -> {
-            if (item.getValue() != null && !predicate.test((T) item.getValue()) && result.getAndSet(false)) {
-                terminate.set(true);
+        forEachChunkAsync(terminate, source.length, (chunkIndex, startInclusive, endExclusive) -> {
+            for (int index = startInclusive; index < endExclusive; index++) {
+                if (shouldTerminate(terminate)) {
+                    return;
+                }
+                final Object value = applyOperations(source[index]);
+                if (value != null && !predicate.test((T) value) && result.getAndSet(false)) {
+                    terminate.set(true);
+                    return;
+                }
             }
         });
         return result.get();
@@ -779,62 +902,162 @@ public class StreamLine<T> implements Stream<T> {
         return !anyMatch(predicate);
     }
 
-    protected <I> void forEachAsync(final AtomicBoolean terminate, final I[] values, final Consumer<Map.Entry<Integer, I>> runnable) {
-        final Semaphore semaphore = threads > 0 ? new Semaphore(threads) : null;
-        final List<Future<?>> futures = new ArrayList<>();
-        final AtomicInteger index = new AtomicInteger(0);
-        for (final I item : values) {
-            final int currentIndex = index.getAndIncrement();
-            try {
-                if (terminate != null && terminate.get()) {
-                    break;
-                }
-                if (semaphore != null) {
-                    semaphore.acquire();
-                }
-                futures.add(executor.submit(() -> {
-                    try {
-                        runnable.accept(new AbstractMap.SimpleImmutableEntry<>(currentIndex, item));
-                    } finally {
-                        if (semaphore != null) {
-                            semaphore.release();
-                        }
-                    }
-                }));
-            } catch (final InterruptedException ie) {
-                Thread.currentThread().interrupt();
+    private <I> void forEachAsync(final AtomicBoolean terminate, final I[] values, final IndexedConsumer<I> runnable) {
+        forEachChunkAsync(terminate, values.length, (chunkIndex, startInclusive, endExclusive) ->
+            runChunk(terminate, values, startInclusive, endExclusive, runnable)
+        );
+    }
+
+    private void forEachChunkAsync(final AtomicBoolean terminate, final int valueCount, final ChunkConsumer consumer) {
+        final int chunkSize = resolveChunkSize(valueCount);
+        final int chunkCount = valueCount < 1 ? 0 : ceilDiv(valueCount, chunkSize);
+        final int workerCount = resolveWorkerCount(valueCount);
+        if (workerCount < 1) {
+            return;
+        }
+
+        if (shouldInlineAutoWork(valueCount)) {
+            consumer.accept(0, 0, valueCount);
+            return;
+        }
+
+        if (workerCount == 1) {
+            consumer.accept(0, 0, valueCount);
+            return;
+        }
+
+        final int firstChunkEnd = shouldRunCallerChunk(valueCount, chunkSize) ? Math.min(chunkSize, valueCount) : 0;
+        if (firstChunkEnd > 0) {
+            consumer.accept(0, 0, firstChunkEnd);
+            if (shouldTerminate(terminate) || firstChunkEnd >= valueCount) {
+                return;
             }
         }
 
+        if (threads < 0) {
+            final List<Future<?>> futures = new ArrayList<>(chunkCount);
+            for (int chunkIndex = firstChunkEnd / chunkSize; chunkIndex < chunkCount; chunkIndex++) {
+                final int currentChunkIndex = chunkIndex;
+                final int startInclusive = currentChunkIndex * chunkSize;
+                futures.add(executor.submit(() -> consumer.accept(
+                    currentChunkIndex,
+                    startInclusive,
+                    Math.min(startInclusive + chunkSize, valueCount)
+                )));
+            }
+            waitFor(futures);
+            return;
+        }
+
+        final AtomicInteger nextChunkIndex = new AtomicInteger(firstChunkEnd / chunkSize);
+        final List<Future<?>> futures = new ArrayList<>(workerCount);
+        for (int worker = 0; worker < workerCount; worker++) {
+            futures.add(executor.submit(() -> {
+                while (!shouldTerminate(terminate)) {
+                    final int chunkIndex = nextChunkIndex.getAndIncrement();
+                    final int startInclusive = chunkIndex * chunkSize;
+                    if (startInclusive >= valueCount) {
+                        return;
+                    }
+                    consumer.accept(chunkIndex, startInclusive, Math.min(startInclusive + chunkSize, valueCount));
+                }
+            }));
+        }
         waitFor(futures);
     }
 
+    private <R> R reduceSource(final Supplier<R> supplier, final BiConsumer<R, Object> accumulator, final BinaryOperator<R> combiner) {
+        final int valueCount = source.length;
+        if (valueCount < 1) {
+            return supplier.get();
+        }
+
+        final int chunkCount = ceilDiv(valueCount, resolveChunkSize(valueCount));
+        final Object[] partialResults = new Object[chunkCount];
+        forEachChunkAsync(null, valueCount, (chunkIndex, startInclusive, endExclusive) -> {
+            final R partialResult = supplier.get();
+            for (int index = startInclusive; index < endExclusive; index++) {
+                final Object result = applyOperations(source[index]);
+                if (result != null) {
+                    accumulator.accept(partialResult, result);
+                }
+            }
+            partialResults[chunkIndex] = partialResult;
+        });
+
+        R result = supplier.get();
+        for (final Object partialResult : partialResults) {
+            if (partialResult != null) {
+                result = combiner.apply(result, (R) partialResult);
+            }
+        }
+        return result;
+    }
+
+    private DoubleSummaryStatistics numericStatisticsOfSource() {
+        return reduceSource(
+            DoubleSummaryStatistics::new,
+            (statistics, item) -> {
+                if (item instanceof Number number) {
+                    statistics.accept(number.doubleValue());
+                }
+            },
+            (left, right) -> {
+                left.combine(right);
+                return left;
+            }
+        );
+    }
+
+    /**
+     * Executes the terminal pipeline using the configured ordering.
+     *
+     * @return the terminal results for the current pipeline
+     */
     protected T[] executeTerminal() {
         return executeTerminal(ordered, false);
     }
 
+    /**
+     * Executes the terminal pipeline with explicit ordering and optional short-circuit behavior for {@code findAny()}.
+     *
+     * @param ordered whether terminal results should preserve encounter order
+     * @param findAny whether execution may stop after the first successful result
+     * @return the terminal results for the current pipeline
+     */
     protected T[] executeTerminal(final boolean ordered, final boolean findAny) {
-        final Map<Integer, T> indexedResults = new ConcurrentHashMap<>();
+        if (findAny) {
+            return executeFindAny();
+        }
+
+        final Object[] orderedResults = ordered ? new Object[source.length] : null;
+        final Queue<T> unorderedResults = ordered ? null : new ConcurrentLinkedQueue<>();
         final AtomicBoolean terminate = new AtomicBoolean(false);
 
-        forEachAsync(terminate, source, item -> {
-            if (findAny && !indexedResults.isEmpty()) {
-                terminate.set(true);
+        forEachAsync(terminate, source, (index, value) -> {
+            final Object result = applyOperations(value);
+            if (result == null) {
+                return;
+            }
+
+            if (ordered) {
+                orderedResults[index] = result;
             } else {
-                final Object result = applyOperations(item.getValue());
-                if (result != null) {
-                    indexedResults.put(item.getKey(), (T) result);
-                }
+                unorderedResults.add((T) result);
             }
         });
 
-        // Collect results in the original order
         return ordered
-            ? IntStream.range(0, source.length).mapToObj(indexedResults::get).filter(Objects::nonNull).toArray(size -> (T[]) new Object[size])
-            : indexedResults.values().toArray((T[]) new Object[0]);
-
+            ? Arrays.stream(orderedResults).map(orderedResult -> (T) orderedResult).filter(Objects::nonNull).toArray(size -> (T[]) new Object[size])
+            : unorderedResults.toArray(size -> (T[]) new Object[size]);
     }
 
+    /**
+     * Applies all registered intermediate operations to a single value.
+     *
+     * @param item the source item to transform
+     * @return the transformed result, or {@code null} when the item is filtered out
+     */
     @SuppressWarnings("java:S4276") // Suppress SonarLint warning about unchecked cast
     protected Object applyOperations(final Object item) {
         Object result = item;
@@ -847,6 +1070,11 @@ public class StreamLine<T> implements Stream<T> {
         return result;
     }
 
+    /**
+     * Waits for all scheduled tasks to finish and rethrows task failures as runtime exceptions.
+     *
+     * @param futures the tasks to wait for
+     */
     public static void waitFor(final List<Future<?>> futures) {
         // Wait for all futures to complete
         for (final Future<?> future : futures) {
@@ -863,5 +1091,122 @@ public class StreamLine<T> implements Stream<T> {
                 }
             }
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private T[] executeFindAny() {
+        final AtomicReference<T> firstResult = new AtomicReference<>();
+        final AtomicBoolean terminate = new AtomicBoolean(false);
+
+        forEachAsync(terminate, source, (index, value) -> {
+            if (shouldTerminate(terminate)) {
+                return;
+            }
+            final Object result = applyOperations(value);
+            if (result != null && firstResult.compareAndSet(null, (T) result)) {
+                terminate.set(true);
+            }
+        });
+
+        final T result = firstResult.get();
+        return result == null ? (T[]) new Object[0] : (T[]) new Object[]{result};
+    }
+
+    /**
+     * Creates a derived stream instance used after terminal pipeline boundaries such as sorting, limiting, or flat-mapping.
+     * Subclasses can override this to preserve their own type while reusing the current executor and scheduling setup.
+     *
+     * @param <R> the type of the derived stream elements
+     * @param values the values for the derived stream
+     * @return a derived {@link StreamLine} instance configured like the current stream
+     */
+    protected <R> StreamLine<R> newStream(final R[] values) {
+        return StreamLine.of(executor, values).ordered(ordered).threads(threads).chunks(chunks);
+    }
+
+    private <I> void runChunk(final AtomicBoolean terminate, final I[] values, final int startInclusive, final int endExclusive, final IndexedConsumer<I> runnable) {
+        for (int index = startInclusive; index < endExclusive; index++) {
+            if (shouldTerminate(terminate)) {
+                return;
+            }
+            runnable.accept(index, values[index]);
+        }
+    }
+
+    private int resolveWorkerCount(final int valueCount) {
+        if (valueCount < 1) {
+            return 0;
+        }
+        if (threads == 1 || valueCount == 1) {
+            return 1;
+        }
+        final int chunkCount = ceilDiv(valueCount, resolveChunkSize(valueCount));
+        return threads > 0 ? Math.min(threads, chunkCount) : chunkCount;
+    }
+
+    private int resolveChunkSize(final int valueCount) {
+        if (valueCount < 2) {
+            return 1;
+        }
+        if (threads == 1) {
+            return valueCount;
+        }
+        if (chunks > 0) {
+            return Math.min(chunks, valueCount);
+        }
+        final int targetChunkCount = Math.min(valueCount, Math.max(1, detectedExecutorParallelism() * autoChunksPerWorker()));
+        return Math.clamp(ceilDiv(valueCount, targetChunkCount), 1, valueCount);
+    }
+
+    private int detectedExecutorParallelism() {
+        if (threads > 0) {
+            return threads;
+        }
+        if (executor instanceof ForkJoinPool forkJoinPool) {
+            return Math.max(1, forkJoinPool.getParallelism());
+        }
+        if (executor instanceof ThreadPoolExecutor threadPoolExecutor) {
+            if (threadPoolExecutor.getMaximumPoolSize() > 0 && threadPoolExecutor.getMaximumPoolSize() < Integer.MAX_VALUE) {
+                return threadPoolExecutor.getMaximumPoolSize();
+            }
+            if (threadPoolExecutor.getCorePoolSize() > 0) {
+                return threadPoolExecutor.getCorePoolSize();
+            }
+        }
+        return Math.max(1, Runtime.getRuntime().availableProcessors());
+    }
+
+    private int autoChunksPerWorker() {
+        return threads > 0 ? AUTO_CHUNKS_PER_BOUNDED_WORKER : AUTO_CHUNKS_PER_UNLIMITED_WORKER;
+    }
+
+    private boolean shouldInlineAutoWork(final int valueCount) {
+        return isAutomaticScheduling() && valueCount <= Math.clamp(detectedExecutorParallelism() * 16, MIN_INLINE_THRESHOLD, MAX_INLINE_THRESHOLD);
+    }
+
+    private boolean shouldRunCallerChunk(final int valueCount, final int chunkSize) {
+        return isAutomaticScheduling() && valueCount > chunkSize;
+    }
+
+    private boolean isAutomaticScheduling() {
+        return threads < 0 && chunks < 0;
+    }
+
+    private static int ceilDiv(final int dividend, final int divisor) {
+        return (dividend + divisor - 1) / divisor;
+    }
+
+    private static boolean shouldTerminate(final AtomicBoolean terminate) {
+        return terminate != null && terminate.get();
+    }
+
+    @FunctionalInterface
+    private interface IndexedConsumer<I> {
+        void accept(int index, I value);
+    }
+
+    @FunctionalInterface
+    private interface ChunkConsumer {
+        void accept(int chunkIndex, int startInclusive, int endExclusive);
     }
 }
