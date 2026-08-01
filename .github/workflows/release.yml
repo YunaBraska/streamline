@@ -3,6 +3,18 @@ name: 🏷️ CD · Release
 on:
   schedule:
     - cron: '0 7 * * *'
+  workflow_call:
+    inputs:
+      dry_run:
+        description: Rehearse all reversible stages while withholding only Maven Central upload.
+        required: false
+        default: false
+        type: boolean
+      force:
+        description: Release even when no source or Maven metadata changed since the latest tag.
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       dry_run:
@@ -42,8 +54,8 @@ jobs:
       - name: Plan date release
         id: plan
         env:
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
-          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+          FORCE: ${{ inputs.force || false }}
         shell: sh
         run: |
           set -eu
