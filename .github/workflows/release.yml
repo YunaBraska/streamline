@@ -170,7 +170,7 @@ jobs:
   build:
     needs:
       - plan
-    if: needs.plan.outputs.should_release == 'true'
+    if: ${{ needs.plan.outputs.should_release == 'true' }}
     permissions:
       contents: read
     uses: ./.github/workflows/build-common.yml
