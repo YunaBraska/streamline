@@ -1,4 +1,4 @@
-name: 🔄 CI · Main
+name: 🔄 CD · Snapshot
 
 on:
   push:
@@ -6,11 +6,16 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      ref:
-        description: Ref.
-        required: false
-        default: ''
-        type: string
+      maven_central:
+        description: Maven Central.
+        required: true
+        default: true
+        type: boolean
+      github_packages:
+        description: GitHub Packages.
+        required: true
+        default: true
+        type: boolean
 
 permissions: {}
 
@@ -19,9 +24,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify:
+  snapshot:
     permissions:
+      actions: read
       contents: read
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_build_common.yml@feature/java-release-cicd-spike
+      deployments: write
+      packages: write
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_snapshot.yml@feature/java-release-cicd-spike
     with:
-      ref: ${{ inputs.ref || github.sha }}
+      github_packages: ${{ github.event_name == 'push' && true || inputs.github_packages }}
+      maven_central: ${{ github.event_name == 'push' && true || inputs.maven_central }}
+      version_source: date
+    secrets:
+      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
+      CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
