@@ -17,6 +17,6 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       maven_central: false
-      github_packages: true
+      github_packages: false
       force: true
     secrets: inherit
