@@ -20,17 +20,17 @@ on:
   workflow_dispatch:
     inputs:
       maven_central:
-        description: Publish to Maven Central.
+        description: Maven Central.
         required: true
         default: true
         type: boolean
       github_packages:
-        description: Publish to GitHub Packages.
+        description: GitHub Packages.
         required: true
         default: true
         type: boolean
       force:
-        description: Release even when source and Maven metadata are unchanged.
+        description: Force.
         required: true
         default: false
         type: boolean

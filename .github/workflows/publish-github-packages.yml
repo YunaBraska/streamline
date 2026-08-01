@@ -14,11 +14,11 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: Workflow run ID containing the build artifact.
+        description: Build run.
         required: true
         type: string
       dry_run:
-        description: Build release packages without uploading to GitHub Packages.
+        description: Dry run.
         required: true
         default: false
         type: boolean
