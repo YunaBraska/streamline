@@ -1,8 +1,6 @@
 name: 🏷️ CD · Release
 
 on:
-  schedule:
-    - cron: '0 7 * * 1'
   workflow_call:
     inputs:
       maven_central:
@@ -41,20 +39,16 @@ jobs:
   release:
     permissions:
       actions: read
-      checks: read
       contents: write
       deployments: write
       packages: write
-      pull-requests: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@feature/java-release-cicd-spike
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@500889119b97ea2fdea9c2d8b4419abab56c68d0
     with:
-      auto_merge: true
       force: ${{ inputs.force }}
-      github_packages: ${{ github.event_name == 'schedule' && true || inputs.github_packages }}
-      maven_central: ${{ github.event_name == 'schedule' && true || inputs.maven_central }}
+      github_packages: ${{ inputs.github_packages }}
+      maven_central: ${{ inputs.maven_central }}
       version_source: date
     secrets:
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
       CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
