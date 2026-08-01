@@ -1,4 +1,4 @@
-name: 🏷️ CD · Release
+name: Publish Streamline
 
 on:
   schedule:

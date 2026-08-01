@@ -1,4 +1,4 @@
-name: 🧪 CI · Pull Request
+name: Build pull request
 
 on:
   pull_request:
@@ -24,7 +24,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify:
+  build:
+    name: Build pull request
     permissions:
       contents: read
     uses: ./.github/workflows/build-common.yml

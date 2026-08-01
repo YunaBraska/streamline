@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       dry_run:
-        description: Verify and sign, but do not upload to Maven Central.
+        description: Sign Maven artifacts but do not upload them to Maven Central.
         required: false
         default: false
         type: boolean

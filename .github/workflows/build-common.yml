@@ -1,4 +1,4 @@
-name: 🧩 CI · Common Build
+name: Build Java
 
 on:
   workflow_call:
@@ -21,10 +21,10 @@ on:
     outputs:
       commit_sha:
         description: Immutable source revision that produced the release workspace.
-        value: ${{ jobs.release-build.outputs.commit_sha }}
+        value: ${{ jobs.build-release-packages.outputs.commit_sha }}
       build_output_timestamp:
         description: UTC commit timestamp used for reproducible build output.
-        value: ${{ jobs.release-build.outputs.build_output_timestamp }}
+        value: ${{ jobs.build-release-packages.outputs.build_output_timestamp }}
   workflow_dispatch:
     inputs:
       ref:
@@ -46,7 +46,8 @@ on:
 permissions: {}
 
 jobs:
-  verify:
+  build-and-test:
+    name: Build and test
     if: inputs.release != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -70,11 +71,12 @@ jobs:
           java-version: ${{ steps.java_info.outputs.java_version }}
           cache: maven
 
-      - name: Verify
+      - name: Build and test
         shell: sh
         run: ${{ steps.java_info.outputs.cmd }} -B verify
 
-  release-build:
+  build-release-packages:
+    name: Build release packages
     if: inputs.release == true
     permissions:
       contents: read
