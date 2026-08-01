@@ -77,11 +77,26 @@ jobs:
           java-version: ${{ steps.java_info.outputs.java_version }}
           cache: maven
 
-      - name: "🏷️ Set Project Version [${{ inputs.version }}]"
-        if: inputs.release == true
+      - name: "🏷️ Read Project Version"
+        id: project_version
+        env:
+          RELEASE: ${{ inputs.release }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: sh
+        run: |
+          set -eu
+          if [ "$RELEASE" = "true" ]; then
+            version="$RELEASE_VERSION"
+          else
+            version=$(./mvnw -q -DforceStdout help:evaluate -Dexpression=project.version)
+          fi
+          test -n "$version"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: "🏷️ Set Project Version [${{ steps.project_version.outputs.version }}]"
         env:
           BUILD_OUTPUT_TIMESTAMP: ${{ steps.commit_info.outputs.build_output_timestamp }}
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.project_version.outputs.version }}
         shell: sh
         run: |
           set -eu
