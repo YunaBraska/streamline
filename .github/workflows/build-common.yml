@@ -76,6 +76,8 @@ jobs:
 
   release-build:
     if: inputs.release == true
+    permissions:
+      contents: read
     uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release_build.yml@feature/java-release-cicd-spike
     with:
       ref: ${{ inputs.ref || github.sha }}
