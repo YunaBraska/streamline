@@ -1,0 +1,15 @@
+name: Daily
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  release:
+    uses: ./.github/workflows/release.yml
+    with:
+      maven_central: false
+      github_packages: true
+      force: true
+    secrets: inherit
