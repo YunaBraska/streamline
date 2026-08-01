@@ -1,44 +1,41 @@
-name: Build Streamline
+name: 🧩 CI · Common Build
 
 on:
   workflow_call:
     inputs:
       ref:
-        description: Commit, branch, or tag to build.
         required: false
         default: ''
         type: string
       release:
-        description: Build a versioned release workspace for publication.
         required: false
         default: false
         type: boolean
       version:
-        description: Version to apply to the release workspace.
         required: false
         default: ''
         type: string
     outputs:
       commit_sha:
-        description: Immutable source revision that produced the build output.
+        description: Resolved commit SHA for this build.
         value: ${{ jobs.build.outputs.commit_sha }}
       build_output_timestamp:
-        description: UTC commit timestamp used for reproducible build output.
+        description: Reproducible build output timestamp.
         value: ${{ jobs.build.outputs.build_output_timestamp }}
   workflow_dispatch:
     inputs:
       ref:
-        description: Commit, branch, or tag to build.
+        description: Git ref to build.
         required: false
         default: ''
         type: string
       release:
-        description: Build a versioned release workspace.
+        description: Build release packages.
         required: true
         default: false
         type: boolean
       version:
-        description: Version to apply when release is enabled.
+        description: Release version.
         required: false
         default: ''
         type: string
@@ -47,11 +44,84 @@ permissions: {}
 
 jobs:
   build:
-    name: Build Streamline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release_build.yml@feature/java-release-cicd-spike
-    with:
-      ref: ${{ inputs.ref || github.sha }}
-      release: ${{ inputs.release }}
-      version: ${{ inputs.version }}
+    outputs:
+      commit_sha: ${{ steps.commit_info.outputs.commit_sha }}
+      build_output_timestamp: ${{ steps.commit_info.outputs.build_output_timestamp }}
+    steps:
+      - name: "🧑‍💻 Checkout [${{ inputs.ref }}]"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: "🧾 Read Commit Info"
+        id: commit_info
+        shell: sh
+        run: |
+          set -eu
+          printf 'commit_sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          printf 'build_output_timestamp=%s\n' "$(git log -1 --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: "🔍 Read Java Info"
+        id: java_info
+        uses: YunaBraska/java-info-action@11a434ffbf6bb3357363d1933be71a4076a90a6b # v3
+
+      - name: "☕ Setup Java [${{ steps.java_info.outputs.java_version }}]"
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ steps.java_info.outputs.java_version }}
+          cache: maven
+
+      - name: "🏷️ Set Project Version [${{ inputs.version }}]"
+        if: inputs.release == true
+        env:
+          BUILD_OUTPUT_TIMESTAMP: ${{ steps.commit_info.outputs.build_output_timestamp }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: sh
+        run: |
+          set -eu
+          test -n "$RELEASE_VERSION"
+          ${{ steps.java_info.outputs.cmd }} -B -Dproject.build.outputTimestamp="$BUILD_OUTPUT_TIMESTAMP" versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false
+
+      - name: "🧪 Build and Verify"
+        env:
+          BUILD_OUTPUT_TIMESTAMP: ${{ steps.commit_info.outputs.build_output_timestamp }}
+          RELEASE: ${{ inputs.release }}
+        shell: sh
+        run: |
+          set -eu
+          if [ "$RELEASE" = "true" ]; then
+            ${{ steps.java_info.outputs.cmd }} -B -Prelease -Dproject.build.outputTimestamp="$BUILD_OUTPUT_TIMESTAMP" -Dgpg.skip=true verify
+          else
+            ${{ steps.java_info.outputs.cmd }} -B -Dproject.build.outputTimestamp="$BUILD_OUTPUT_TIMESTAMP" verify
+          fi
+
+      - name: "📦 Upload Build Artifact"
+        if: inputs.release == true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: build-workspace
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+          path: |
+            .mvn
+            mvnw
+            mvnw.cmd
+            pom.xml
+            target
+            !target/site
+            !target/site/**
+            !target/apidocs
+            !target/apidocs/**
+            !target/javadoc-bundle-options
+            !target/javadoc-bundle-options/**
+            !target/maven-javadoc-plugin-stale-data.txt
+            !target/jacoco.exec
+            !target/surefire-reports
+            !target/surefire-reports/**

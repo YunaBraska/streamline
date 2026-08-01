@@ -1,15 +1,17 @@
-name: 📦 CD · Publish Maven Central
+name: 📦 CD · Publish Central
 
 on:
   workflow_call:
     inputs:
+      run_id:
+        required: false
+        default: ''
+        type: string
       dry_run:
-        description: Sign Maven artifacts but do not upload them to Maven Central.
         required: false
         default: false
         type: boolean
       build_output_timestamp:
-        description: UTC timestamp resolved by the release build.
         required: true
         type: string
     secrets:
@@ -21,6 +23,21 @@ on:
         required: true
       GPG_PASSPHRASE:
         required: true
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Workflow run ID containing the build artifact.
+        required: true
+        type: string
+      dry_run:
+        description: Sign artifacts without uploading to Maven Central.
+        required: true
+        default: false
+        type: boolean
+      build_output_timestamp:
+        description: Reproducible build output timestamp.
+        required: true
+        type: string
 
 permissions: {}
 
@@ -32,6 +49,7 @@ jobs:
       deployments: write
     uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_central.yml@feature/java-release-cicd-spike
     with:
+      run_id: ${{ inputs.run_id }}
       dry_run: ${{ inputs.dry_run }}
       build_output_timestamp: ${{ inputs.build_output_timestamp }}
     secrets:

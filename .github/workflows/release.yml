@@ -1,17 +1,36 @@
-name: Publish Streamline
+name: 🏷️ CD · Release
 
 on:
   schedule:
-    - cron: '0 7 * * *'
-  workflow_dispatch:
+    - cron: '0 7 * * 1'
+  workflow_call:
     inputs:
-      dry_run:
-        description: Rehearse all reversible stages while withholding only Maven Central upload.
-        required: true
-        default: false
+      maven_central:
+        required: false
+        default: true
+        type: boolean
+      github_packages:
+        required: false
+        default: true
         type: boolean
       force:
-        description: Release even when no source or Maven metadata changed since the latest tag.
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      maven_central:
+        description: Publish to Maven Central.
+        required: true
+        default: true
+        type: boolean
+      github_packages:
+        description: Publish to GitHub Packages.
+        required: true
+        default: true
+        type: boolean
+      force:
+        description: Release even when source and Maven metadata are unchanged.
         required: true
         default: false
         type: boolean
@@ -19,37 +38,85 @@ on:
 permissions: {}
 
 concurrency:
-  group: streamline-release
+  group: release
   cancel-in-progress: false
 
 jobs:
+  merge:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      checks: read
+      contents: write
+      pull-requests: write
+    outputs:
+      enabled: ${{ steps.merge.outputs.enabled }}
+    steps:
+      - name: "🤖 Merge Green Updates"
+        id: merge
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+        shell: sh
+        run: |
+          set -eu
+          if [ -z "${GH_TOKEN:-}" ]; then
+            printf 'enabled=false\n' >> "$GITHUB_OUTPUT"
+            echo "BOT_TOKEN is not configured; weekly release is disabled."
+            exit 0
+          fi
+
+          printf 'enabled=true\n' >> "$GITHUB_OUTPUT"
+          gh pr list --base main --state open --json number,headRefName,isDraft,mergeStateStatus \
+            --jq '.[] | select(.isDraft == false) | select(.mergeStateStatus == "CLEAN") | select((.headRefName | startswith("dependabot/")) or (.headRefName | startswith("bot/maintenance-"))) | .number' \
+            | while IFS= read -r pr; do
+                if ! gh pr checks "$pr" >/dev/null 2>&1; then
+                  echo "PR #$pr is not green; leaving it open."
+                  continue
+                fi
+                gh pr merge "$pr" --squash --delete-branch
+              done
+
   plan:
+    needs:
+      - merge
+    if: ${{ always() && (needs.merge.result == 'success' || needs.merge.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     outputs:
-      dry_run: ${{ steps.plan.outputs.dry_run }}
+      dry_run_central: ${{ steps.plan.outputs.dry_run_central }}
+      dry_run_github_packages: ${{ steps.plan.outputs.dry_run_github_packages }}
       ref: ${{ steps.plan.outputs.ref }}
       should_release: ${{ steps.plan.outputs.should_release }}
       version: ${{ steps.plan.outputs.version }}
     steps:
-      - name: Checkout
+      - name: "🧑‍💻 Checkout"
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
 
-      - name: Plan date release
+      - name: "🏷️ Plan Date Release"
         id: plan
         env:
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
-          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+          AUTO_RELEASE: ${{ needs.merge.outputs.enabled }}
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE: ${{ inputs.force || false }}
+          GITHUB_PACKAGES: ${{ github.event_name == 'schedule' && true || inputs.github_packages }}
+          MAVEN_CENTRAL: ${{ github.event_name == 'schedule' && true || inputs.maven_central }}
         shell: sh
         run: |
           set -eu
+          git fetch --tags origin
 
-          if [ "$DRY_RUN" != "true" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
-            echo "A live release must run from main." >&2
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            git fetch origin main
+            git checkout --detach origin/main
+          fi
+
+          if [ "$MAVEN_CENTRAL" = "true" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Maven Central publishing must run from main." >&2
             exit 1
           fi
 
@@ -62,7 +129,9 @@ jobs:
           fi
 
           should_release=false
-          if [ "$DRY_RUN" = "true" ] || [ "$FORCE" = "true" ] || [ "$has_material_changes" = "true" ]; then
+          if [ "$EVENT_NAME" = "schedule" ] && [ "$AUTO_RELEASE" = "true" ] && [ "$has_material_changes" = "true" ]; then
+            should_release=true
+          elif [ "$EVENT_NAME" != "schedule" ] && { [ "$FORCE" = "true" ] || [ "$has_material_changes" = "true" ]; }; then
             should_release=true
           fi
 
@@ -72,20 +141,35 @@ jobs:
             exit 1
           fi
 
+          if [ "$MAVEN_CENTRAL" = "true" ]; then
+            dry_run_central=false
+          else
+            dry_run_central=true
+          fi
+          if [ "$GITHUB_PACKAGES" = "true" ]; then
+            dry_run_github_packages=false
+          else
+            dry_run_github_packages=true
+          fi
+
           {
-            printf 'dry_run=%s\n' "$DRY_RUN"
-            printf 'ref=%s\n' "$GITHUB_SHA"
+            printf 'dry_run_central=%s\n' "$dry_run_central"
+            printf 'dry_run_github_packages=%s\n' "$dry_run_github_packages"
+            printf 'ref=%s\n' "$(git rev-parse HEAD)"
             printf 'should_release=%s\n' "$should_release"
             printf 'version=%s\n' "$version"
           } >> "$GITHUB_OUTPUT"
 
           printf 'latest_tag=%s\n' "${latest_tag:-none}"
           printf 'has_material_changes=%s\n' "$has_material_changes"
+          printf 'maven_central=%s\n' "$MAVEN_CENTRAL"
+          printf 'github_packages=%s\n' "$GITHUB_PACKAGES"
           printf 'should_release=%s\n' "$should_release"
           printf 'version=%s\n' "$version"
 
   build:
-    needs: plan
+    needs:
+      - plan
     if: needs.plan.outputs.should_release == 'true'
     permissions:
       contents: read
@@ -106,7 +190,7 @@ jobs:
       deployments: write
     uses: ./.github/workflows/publish-central.yml
     with:
-      dry_run: ${{ needs.plan.outputs.dry_run == 'true' }}
+      dry_run: ${{ needs.plan.outputs.dry_run_central == 'true' }}
       build_output_timestamp: ${{ needs.build.outputs.build_output_timestamp }}
     secrets: inherit
 
@@ -122,6 +206,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/publish-github-packages.yml
     with:
+      dry_run: ${{ needs.plan.outputs.dry_run_github_packages == 'true' }}
       build_output_timestamp: ${{ needs.build.outputs.build_output_timestamp }}
 
   create-release:
@@ -131,11 +216,63 @@ jobs:
       - publish-central
       - publish-github-packages
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.publish-central.result == 'success' && needs.publish-github-packages.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_create_github_release.yml@feature/java-release-cicd-spike
-    with:
-      ref: ${{ needs.build.outputs.commit_sha }}
-      version: ${{ needs.plan.outputs.version }}
-    secrets: inherit
+    steps:
+      - name: "🧑‍💻 Checkout [${{ needs.build.outputs.commit_sha }}]"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.build.outputs.commit_sha }}
+
+      - name: "📥 Download Build Artifact"
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: build-workspace
+          path: ${{ github.workspace }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "🔍 Read Java Info"
+        id: java_info
+        uses: YunaBraska/java-info-action@11a434ffbf6bb3357363d1933be71a4076a90a6b # v3
+
+      - name: "☕ Setup Java [${{ steps.java_info.outputs.java_version }}]"
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ steps.java_info.outputs.java_version }}
+          cache: maven
+
+      - name: "📦 Prepare Release Assets"
+        env:
+          MAVEN_CMD: ${{ steps.java_info.outputs.cmd }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        shell: sh
+        run: |
+          set -eu
+          artifact_id=$($MAVEN_CMD -q -DforceStdout help:evaluate -Dexpression=project.artifactId)
+          assets_dir="$RUNNER_TEMP/release-assets"
+          rm -rf "$assets_dir"
+          mkdir -p "$assets_dir"
+          cp pom.xml "$assets_dir/${artifact_id}-${RELEASE_VERSION}.pom"
+          cp "target/${artifact_id}-${RELEASE_VERSION}.jar" "$assets_dir/"
+          cp "target/${artifact_id}-${RELEASE_VERSION}-sources.jar" "$assets_dir/"
+          cp "target/${artifact_id}-${RELEASE_VERSION}-javadoc.jar" "$assets_dir/"
+
+      - name: "🏷️ Create GitHub Release [${{ needs.plan.outputs.version }}]"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          TARGET_SHA: ${{ needs.build.outputs.commit_sha }}
+        shell: sh
+        run: |
+          set -eu
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "GitHub release already exists for $RELEASE_VERSION"
+          else
+            gh release create "$RELEASE_VERSION" --target "$TARGET_SHA" --generate-notes
+          fi
+          gh release upload "$RELEASE_VERSION" "$RUNNER_TEMP/release-assets"/* --clobber

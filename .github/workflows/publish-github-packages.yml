@@ -3,8 +3,30 @@ name: 📦 CD · Publish GitHub Packages
 on:
   workflow_call:
     inputs:
+      run_id:
+        required: false
+        default: ''
+        type: string
+      dry_run:
+        required: false
+        default: false
+        type: boolean
       build_output_timestamp:
-        description: UTC timestamp resolved by the release build.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Workflow run ID containing the build artifact.
+        required: true
+        type: string
+      dry_run:
+        description: Build release packages without uploading to GitHub Packages.
+        required: true
+        default: false
+        type: boolean
+      build_output_timestamp:
+        description: Reproducible build output timestamp.
         required: true
         type: string
 
@@ -19,4 +41,6 @@ jobs:
       packages: write
     uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_github_packages.yml@feature/java-release-cicd-spike
     with:
+      run_id: ${{ inputs.run_id }}
+      dry_run: ${{ inputs.dry_run }}
       build_output_timestamp: ${{ inputs.build_output_timestamp }}

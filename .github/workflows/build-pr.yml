@@ -1,4 +1,4 @@
-name: Build pull request
+name: 🧪 CI · Pull Request
 
 on:
   pull_request:
@@ -8,11 +8,10 @@ on:
       - opened
       - synchronize
       - reopened
-      - ready_for_review
   workflow_dispatch:
     inputs:
       ref:
-        description: Commit, branch, or tag to build.
+        description: Git ref to build.
         required: false
         default: ''
         type: string
@@ -20,14 +19,13 @@ on:
 permissions: {}
 
 concurrency:
-  group: streamline-build-pr-${{ github.event.pull_request.number || github.run_id }}
+  group: build-pr-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build pull request
+  verify:
     permissions:
       contents: read
     uses: ./.github/workflows/build-common.yml
     with:
-      ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+      ref: ${{ inputs.ref || github.sha }}
