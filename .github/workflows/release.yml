@@ -62,21 +62,21 @@ jobs:
           set -eu
           if [ -z "${GH_TOKEN:-}" ]; then
             printf 'enabled=false\n'
-            printf 'enabled=false\n' >> "$GITHUB_OUTPUT"
+            printf 'enabled=false\n' >> "${GITHUB_OUTPUT}"
             echo "BOT_TOKEN is not configured; weekly release is disabled."
             exit 0
           fi
 
           printf 'enabled=true\n'
-          printf 'enabled=true\n' >> "$GITHUB_OUTPUT"
+          printf 'enabled=true\n' >> "${GITHUB_OUTPUT}"
           gh pr list --base main --state open --json number,headRefName,isDraft,mergeStateStatus \
             --jq '.[] | select(.isDraft == false) | select(.mergeStateStatus == "CLEAN") | select((.headRefName | startswith("dependabot/")) or (.headRefName | startswith("bot/maintenance-"))) | .number' \
             | while IFS= read -r pr; do
-                if ! gh pr checks "$pr" >/dev/null 2>&1; then
-                  echo "PR #$pr is not green; leaving it open."
+                if ! gh pr checks "${pr}" >/dev/null 2>&1; then
+                  echo "PR #${pr} is not green; leaving it open."
                   continue
                 fi
-                gh pr merge "$pr" --squash --delete-branch
+                gh pr merge "${pr}" --squash --delete-branch
               done
 
   plan:
@@ -112,43 +112,43 @@ jobs:
           set -eu
           git fetch --tags origin
 
-          if [ "$EVENT_NAME" = "schedule" ]; then
+          if [ "${EVENT_NAME}" = "schedule" ]; then
             git fetch origin main
             git checkout --detach origin/main
           fi
 
-          if [ "$MAVEN_CENTRAL" = "true" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+          if [ "${MAVEN_CENTRAL}" = "true" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
             echo "Maven Central publishing must run from main." >&2
             exit 1
           fi
 
           latest_tag=$(git tag --merged HEAD --sort=-creatordate | sed -n '1p')
           has_material_changes=false
-          if [ -z "$latest_tag" ]; then
+          if [ -z "${latest_tag}" ]; then
             has_material_changes=true
-          elif ! git diff --quiet "$latest_tag"..HEAD -- pom.xml src; then
+          elif ! git diff --quiet "${latest_tag}"..HEAD -- pom.xml src; then
             has_material_changes=true
           fi
 
           should_release=false
-          if [ "$EVENT_NAME" = "schedule" ] && [ "$AUTO_RELEASE" = "true" ] && [ "$has_material_changes" = "true" ]; then
+          if [ "${EVENT_NAME}" = "schedule" ] && [ "${AUTO_RELEASE}" = "true" ] && [ "${has_material_changes}" = "true" ]; then
             should_release=true
-          elif [ "$EVENT_NAME" != "schedule" ] && { [ "$FORCE" = "true" ] || [ "$has_material_changes" = "true" ]; }; then
+          elif [ "${EVENT_NAME}" != "schedule" ] && { [ "${FORCE}" = "true" ] || [ "${has_material_changes}" = "true" ]; }; then
             should_release=true
           fi
 
-          version=$(date -u '+%Y.%m.%d')
-          if [ "$should_release" = "true" ] && git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
-            echo "Release tag already exists: $version" >&2
+          version=$(git log -1 --format=%cs HEAD | tr '-' '.')
+          if [ "${should_release}" = "true" ] && git rev-parse -q --verify "refs/tags/${version}" >/dev/null; then
+            echo "Release tag already exists: ${version}" >&2
             exit 1
           fi
 
-          if [ "$MAVEN_CENTRAL" = "true" ]; then
+          if [ "${MAVEN_CENTRAL}" = "true" ]; then
             dry_run_central=false
           else
             dry_run_central=true
           fi
-          if [ "$GITHUB_PACKAGES" = "true" ]; then
+          if [ "${GITHUB_PACKAGES}" = "true" ]; then
             dry_run_github_packages=false
           else
             dry_run_github_packages=true
@@ -156,22 +156,22 @@ jobs:
 
           ref=$(git rev-parse HEAD)
           {
-            printf 'dry_run_central=%s\n' "$dry_run_central"
-            printf 'dry_run_github_packages=%s\n' "$dry_run_github_packages"
-            printf 'ref=%s\n' "$ref"
-            printf 'should_release=%s\n' "$should_release"
-            printf 'version=%s\n' "$version"
-          } >> "$GITHUB_OUTPUT"
+            printf 'dry_run_central=%s\n' "${dry_run_central}"
+            printf 'dry_run_github_packages=%s\n' "${dry_run_github_packages}"
+            printf 'ref=%s\n' "${ref}"
+            printf 'should_release=%s\n' "${should_release}"
+            printf 'version=%s\n' "${version}"
+          } >> "${GITHUB_OUTPUT}"
 
-          printf 'dry_run_central=%s\n' "$dry_run_central"
-          printf 'dry_run_github_packages=%s\n' "$dry_run_github_packages"
-          printf 'ref=%s\n' "$ref"
+          printf 'dry_run_central=%s\n' "${dry_run_central}"
+          printf 'dry_run_github_packages=%s\n' "${dry_run_github_packages}"
+          printf 'ref=%s\n' "${ref}"
           printf 'latest_tag=%s\n' "${latest_tag:-none}"
-          printf 'has_material_changes=%s\n' "$has_material_changes"
-          printf 'maven_central=%s\n' "$MAVEN_CENTRAL"
-          printf 'github_packages=%s\n' "$GITHUB_PACKAGES"
-          printf 'should_release=%s\n' "$should_release"
-          printf 'version=%s\n' "$version"
+          printf 'has_material_changes=%s\n' "${has_material_changes}"
+          printf 'maven_central=%s\n' "${MAVEN_CENTRAL}"
+          printf 'github_packages=%s\n' "${GITHUB_PACKAGES}"
+          printf 'should_release=%s\n' "${should_release}"
+          printf 'version=%s\n' "${version}"
 
   build:
     needs:
@@ -183,7 +183,6 @@ jobs:
     with:
       ref: ${{ needs.plan.outputs.ref }}
       release: true
-      version: ${{ needs.plan.outputs.version }}
 
   publish-central:
     needs:
@@ -257,14 +256,14 @@ jobs:
         shell: sh
         run: |
           set -eu
-          artifact_id=$($MAVEN_CMD -q -DforceStdout help:evaluate -Dexpression=project.artifactId)
-          assets_dir="$RUNNER_TEMP/release-assets"
-          rm -rf "$assets_dir"
-          mkdir -p "$assets_dir"
-          cp pom.xml "$assets_dir/${artifact_id}-${RELEASE_VERSION}.pom"
-          cp "target/${artifact_id}-${RELEASE_VERSION}.jar" "$assets_dir/"
-          cp "target/${artifact_id}-${RELEASE_VERSION}-sources.jar" "$assets_dir/"
-          cp "target/${artifact_id}-${RELEASE_VERSION}-javadoc.jar" "$assets_dir/"
+          artifact_id=$(${MAVEN_CMD} -q -DforceStdout help:evaluate -Dexpression=project.artifactId)
+          assets_dir="${RUNNER_TEMP}/release-assets"
+          rm -rf "${assets_dir}"
+          mkdir -p "${assets_dir}"
+          cp pom.xml "${assets_dir}/${artifact_id}-${RELEASE_VERSION}.pom"
+          cp "target/${artifact_id}-${RELEASE_VERSION}.jar" "${assets_dir}/"
+          cp "target/${artifact_id}-${RELEASE_VERSION}-sources.jar" "${assets_dir}/"
+          cp "target/${artifact_id}-${RELEASE_VERSION}-javadoc.jar" "${assets_dir}/"
 
       - name: "🏷️ Create GitHub Release [${{ needs.plan.outputs.version }}]"
         env:
@@ -274,9 +273,9 @@ jobs:
         shell: sh
         run: |
           set -eu
-          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
-            echo "GitHub release already exists for $RELEASE_VERSION"
+          if gh release view "${RELEASE_VERSION}" >/dev/null 2>&1; then
+            echo "GitHub release already exists for ${RELEASE_VERSION}"
           else
-            gh release create "$RELEASE_VERSION" --target "$TARGET_SHA" --generate-notes
+            gh release create "${RELEASE_VERSION}" --target "${TARGET_SHA}" --generate-notes
           fi
-          gh release upload "$RELEASE_VERSION" "$RUNNER_TEMP/release-assets"/* --clobber
+          gh release upload "${RELEASE_VERSION}" "${RUNNER_TEMP}/release-assets"/* --clobber

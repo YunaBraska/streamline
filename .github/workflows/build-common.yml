@@ -11,10 +11,6 @@ on:
         required: false
         default: false
         type: boolean
-      version:
-        required: false
-        default: ''
-        type: string
     outputs:
       commit_sha:
         description: Commit SHA.
@@ -31,11 +27,6 @@ on:
         required: true
         default: false
         type: boolean
-      version:
-        description: Version.
-        required: false
-        default: ''
-        type: string
 
 permissions: {}
 
@@ -60,8 +51,11 @@ jobs:
         run: |
           set -eu
           commit_sha=$(git rev-parse HEAD)
-          printf 'commit_sha=%s\n' "$commit_sha"
-          printf 'commit_sha=%s\n' "$commit_sha" >> "$GITHUB_OUTPUT"
+          version=$(git log -1 --format=%cs HEAD | tr '-' '.')
+          printf 'commit_sha=%s\n' "${commit_sha}"
+          printf 'version=%s\n' "${version}"
+          printf 'commit_sha=%s\n' "${commit_sha}" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
 
       - name: "🔍 Read Java Info"
         id: java_info
@@ -74,34 +68,13 @@ jobs:
           java-version: ${{ steps.java_info.outputs.java_version }}
           cache: maven
 
-      - name: "🧮 Resolve Version"
-        id: resolve_version
+      - name: "🏷️ Set Project Version [${{ steps.commit_info.outputs.version }}]"
         env:
-          RELEASE: ${{ inputs.release }}
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.commit_info.outputs.version }}
         shell: sh
         run: |
           set -eu
-          if [ "$RELEASE" = "true" ]; then
-            version="$RELEASE_VERSION"
-          else
-            version=$(git log -1 --format=%cs HEAD | tr '-' '.')
-          fi
-          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}$'; then
-            echo "Version must use YYYY.MM.DD, got: $version" >&2
-            exit 1
-          fi
-          printf 'version=%s\n' "$version"
-          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
-
-      - name: "🏷️ Set Project Version [${{ steps.resolve_version.outputs.version }}]"
-        env:
-          RELEASE_VERSION: ${{ steps.resolve_version.outputs.version }}
-        shell: sh
-        run: |
-          set -eu
-          test -n "$RELEASE_VERSION"
-          ${{ steps.java_info.outputs.cmd }} -B versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false
+          ${{ steps.java_info.outputs.cmd }} -B versions:set -DnewVersion="${RELEASE_VERSION}" -DgenerateBackupPoms=false
 
       - name: "🧪 Build and Verify"
         env:
@@ -109,7 +82,7 @@ jobs:
         shell: sh
         run: |
           set -eu
-          if [ "$RELEASE" = "true" ]; then
+          if [ "${RELEASE}" = "true" ]; then
             ${{ steps.java_info.outputs.cmd }} -B -Prelease -Dgpg.skip=true verify
           else
             ${{ steps.java_info.outputs.cmd }} -B verify
