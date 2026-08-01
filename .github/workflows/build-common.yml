@@ -52,10 +52,15 @@ jobs:
           set -eu
           commit_sha=$(git rev-parse HEAD)
           version=$(git log -1 --format=%cs HEAD | tr '-' '.')
+          build_output_timestamp=$(git log -1 --format=%cI HEAD)
           printf 'commit_sha=%s\n' "${commit_sha}"
           printf 'version=%s\n' "${version}"
-          printf 'commit_sha=%s\n' "${commit_sha}" >> "${GITHUB_OUTPUT}"
-          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
+          printf 'build_output_timestamp=%s\n' "${build_output_timestamp}"
+          {
+            printf 'commit_sha=%s\n' "${commit_sha}"
+            printf 'version=%s\n' "${version}"
+            printf 'build_output_timestamp=%s\n' "${build_output_timestamp}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: "🔍 Read Java Info"
         id: java_info
@@ -73,6 +78,7 @@ jobs:
         run: |
           set -eu
           ${{ steps.java_info.outputs.cmd }} -B versions:set -DnewVersion="${{ steps.commit_info.outputs.version }}" -DgenerateBackupPoms=false
+          ${{ steps.java_info.outputs.cmd }} -B versions:set-property -Dproperty=project.build.outputTimestamp -DnewVersion="${{ steps.commit_info.outputs.build_output_timestamp }}" -DgenerateBackupPoms=false
 
       - name: "🧪 Build and Verify"
         shell: sh
