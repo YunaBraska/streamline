@@ -69,12 +69,10 @@ jobs:
           cache: maven
 
       - name: "🏷️ Set Project Version [${{ steps.commit_info.outputs.version }}]"
-        env:
-          RELEASE_VERSION: ${{ steps.commit_info.outputs.version }}
         shell: sh
         run: |
           set -eu
-          ${{ steps.java_info.outputs.cmd }} -B versions:set -DnewVersion="${RELEASE_VERSION}" -DgenerateBackupPoms=false
+          ${{ steps.java_info.outputs.cmd }} -B versions:set -DnewVersion="${{ steps.commit_info.outputs.version }}" -DgenerateBackupPoms=false
 
       - name: "🧪 Build and Verify"
         env:
@@ -83,7 +81,7 @@ jobs:
         run: |
           set -eu
           if [ "${RELEASE}" = "true" ]; then
-            ${{ steps.java_info.outputs.cmd }} -B -Prelease -Dgpg.skip=true verify
+            ${{ steps.java_info.outputs.cmd }} -B -Dmaven.javadoc.skip=false verify
           else
             ${{ steps.java_info.outputs.cmd }} -B verify
           fi
