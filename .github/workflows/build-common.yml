@@ -1,4 +1,4 @@
-name: Build Java
+name: Build Streamline
 
 on:
   workflow_call:
@@ -47,7 +47,7 @@ permissions: {}
 
 jobs:
   build:
-    name: Build Java
+    name: Build Streamline
     permissions:
       contents: read
     uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release_build.yml@feature/java-release-cicd-spike
