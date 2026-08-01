@@ -1,0 +1,32 @@
+name: 🧪 CI · Pull Request
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch, or tag to build.
+        required: false
+        default: ''
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: streamline-build-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-common.yml
+    with:
+      ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}

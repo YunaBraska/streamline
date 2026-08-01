@@ -1,0 +1,27 @@
+name: 🔄 CI · Main Branch
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch, or tag to build.
+        required: false
+        default: ''
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: streamline-build-main-${{ github.ref || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-common.yml
+    with:
+      ref: ${{ inputs.ref || github.sha }}

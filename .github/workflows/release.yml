@@ -1,0 +1,141 @@
+name: 🏷️ CD · Release
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Rehearse all reversible stages while withholding only Maven Central upload.
+        required: true
+        default: false
+        type: boolean
+      force:
+        description: Release even when no source or Maven metadata changed since the latest tag.
+        required: true
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: streamline-release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+      ref: ${{ steps.plan.outputs.ref }}
+      should_release: ${{ steps.plan.outputs.should_release }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Plan date release
+        id: plan
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+        shell: sh
+        run: |
+          set -eu
+
+          if [ "$DRY_RUN" != "true" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "A live release must run from main." >&2
+            exit 1
+          fi
+
+          latest_tag=$(git tag --merged HEAD --sort=-creatordate | sed -n '1p')
+          has_material_changes=false
+          if [ -z "$latest_tag" ]; then
+            has_material_changes=true
+          elif ! git diff --quiet "$latest_tag"..HEAD -- pom.xml src; then
+            has_material_changes=true
+          fi
+
+          should_release=false
+          if [ "$DRY_RUN" = "true" ] || [ "$FORCE" = "true" ] || [ "$has_material_changes" = "true" ]; then
+            should_release=true
+          fi
+
+          version=$(date -u '+%Y.%m.%d')
+          if [ "$should_release" = "true" ] && git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "Release tag already exists: $version" >&2
+            exit 1
+          fi
+
+          {
+            printf 'dry_run=%s\n' "$DRY_RUN"
+            printf 'ref=%s\n' "$GITHUB_SHA"
+            printf 'should_release=%s\n' "$should_release"
+            printf 'version=%s\n' "$version"
+          } >> "$GITHUB_OUTPUT"
+
+          printf 'latest_tag=%s\n' "${latest_tag:-none}"
+          printf 'has_material_changes=%s\n' "$has_material_changes"
+          printf 'should_release=%s\n' "$should_release"
+          printf 'version=%s\n' "$version"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.should_release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-common.yml
+    with:
+      ref: ${{ needs.plan.outputs.ref }}
+      release: true
+      version: ${{ needs.plan.outputs.version }}
+
+  publish-central:
+    needs:
+      - plan
+      - build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/publish-central.yml
+    with:
+      dry_run: ${{ needs.plan.outputs.dry_run == 'true' }}
+      build_output_timestamp: ${{ needs.build.outputs.build_output_timestamp }}
+    secrets: inherit
+
+  publish-github-packages:
+    needs:
+      - plan
+      - build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      packages: write
+    uses: ./.github/workflows/publish-github-packages.yml
+    with:
+      build_output_timestamp: ${{ needs.build.outputs.build_output_timestamp }}
+
+  create-release:
+    needs:
+      - plan
+      - build
+      - publish-central
+      - publish-github-packages
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.publish-central.result == 'success' && needs.publish-github-packages.result == 'success' }}
+    permissions:
+      actions: read
+      contents: write
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_create_github_release.yml@feature/java-release-cicd-spike
+    with:
+      ref: ${{ needs.build.outputs.commit_sha }}
+      version: ${{ needs.plan.outputs.version }}
+    secrets: inherit

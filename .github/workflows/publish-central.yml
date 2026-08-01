@@ -1,0 +1,41 @@
+name: 📦 CD · Publish Maven Central
+
+on:
+  workflow_call:
+    inputs:
+      dry_run:
+        description: Verify and sign, but do not upload to Maven Central.
+        required: false
+        default: false
+        type: boolean
+      build_output_timestamp:
+        description: UTC timestamp resolved by the release build.
+        required: true
+        type: string
+    secrets:
+      CENTRAL_USER:
+        required: true
+      CENTRAL_PASS:
+        required: true
+      GPG_SIGNING_KEY:
+        required: true
+      GPG_PASSPHRASE:
+        required: true
+
+permissions: {}
+
+jobs:
+  publish:
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_central.yml@feature/java-release-cicd-spike
+    with:
+      dry_run: ${{ inputs.dry_run }}
+      build_output_timestamp: ${{ inputs.build_output_timestamp }}
+    secrets:
+      CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
+      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
+      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
