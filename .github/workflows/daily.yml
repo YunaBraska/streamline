@@ -7,6 +7,13 @@ permissions: {}
 
 jobs:
   release:
+    permissions:
+      actions: read
+      checks: read
+      contents: write
+      deployments: write
+      packages: write
+      pull-requests: write
     uses: ./.github/workflows/release.yml
     with:
       maven_central: false
