@@ -20,11 +20,11 @@ on:
         type: string
     outputs:
       commit_sha:
-        description: Immutable source revision that produced the release workspace.
-        value: ${{ jobs.build-release-packages.outputs.commit_sha }}
+        description: Immutable source revision that produced the build output.
+        value: ${{ jobs.build.outputs.commit_sha }}
       build_output_timestamp:
         description: UTC commit timestamp used for reproducible build output.
-        value: ${{ jobs.build-release-packages.outputs.build_output_timestamp }}
+        value: ${{ jobs.build.outputs.build_output_timestamp }}
   workflow_dispatch:
     inputs:
       ref:
@@ -46,41 +46,12 @@ on:
 permissions: {}
 
 jobs:
-  build-and-test:
-    name: Build and test
-    if: inputs.release != true
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout ${{ inputs.ref || github.sha }}
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          fetch-depth: 1
-          ref: ${{ inputs.ref || github.sha }}
-
-      - name: Read Java information
-        id: java_info
-        uses: YunaBraska/java-info-action@11a434ffbf6bb3357363d1933be71a4076a90a6b # v3
-
-      - name: Set up Java ${{ steps.java_info.outputs.java_version }}
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
-        with:
-          distribution: temurin
-          java-version: ${{ steps.java_info.outputs.java_version }}
-          cache: maven
-
-      - name: Build and test
-        shell: sh
-        run: ${{ steps.java_info.outputs.cmd }} -B verify
-
-  build-release-packages:
-    name: Build release packages
-    if: inputs.release == true
+  build:
+    name: Build Java
     permissions:
       contents: read
     uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release_build.yml@feature/java-release-cicd-spike
     with:
       ref: ${{ inputs.ref || github.sha }}
+      release: ${{ inputs.release }}
       version: ${{ inputs.version }}
