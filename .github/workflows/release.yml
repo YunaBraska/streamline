@@ -170,7 +170,7 @@ jobs:
   build:
     needs:
       - plan
-    if: ${{ needs.plan.outputs.should_release == 'true' }}
+    if: ${{ always() && needs.plan.outputs.should_release == 'true' }}
     permissions:
       contents: read
     uses: ./.github/workflows/build-common.yml
@@ -183,7 +183,7 @@ jobs:
     needs:
       - plan
       - build
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    if: ${{ always() && !cancelled() && needs.build.result == 'success' }}
     permissions:
       actions: read
       contents: read
@@ -198,7 +198,7 @@ jobs:
     needs:
       - plan
       - build
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    if: ${{ always() && !cancelled() && needs.build.result == 'success' }}
     permissions:
       actions: read
       contents: read
@@ -215,7 +215,7 @@ jobs:
       - build
       - publish-central
       - publish-github-packages
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.publish-central.result == 'success' && needs.publish-github-packages.result == 'success' }}
+    if: ${{ always() && !cancelled() && needs.build.result == 'success' && needs.publish-central.result == 'success' && needs.publish-github-packages.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
