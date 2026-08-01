@@ -51,7 +51,6 @@
         <!-- BUILD -->
         <maven-gpg-plugin.version>3.2.7</maven-gpg-plugin.version>
         <maven-source-plugin.version>3.2.1</maven-source-plugin.version>
-        <maven.javadoc.skip>true</maven.javadoc.skip>
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
         <maven-javadoc-plugin.version>3.11.2</maven-javadoc-plugin.version>
         <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
@@ -167,7 +166,6 @@
                             <quiet>true</quiet>
                             <doclint>none</doclint>
                             <failOnError>false</failOnError>
-                            <skip>${maven.javadoc.skip}</skip>
                         </configuration>
                     </execution>
                 </executions>

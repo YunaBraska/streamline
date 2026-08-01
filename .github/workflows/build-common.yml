@@ -75,16 +75,8 @@ jobs:
           ${{ steps.java_info.outputs.cmd }} -B versions:set -DnewVersion="${{ steps.commit_info.outputs.version }}" -DgenerateBackupPoms=false
 
       - name: "🧪 Build and Verify"
-        env:
-          RELEASE: ${{ inputs.release }}
         shell: sh
-        run: |
-          set -eu
-          if [ "${RELEASE}" = "true" ]; then
-            ${{ steps.java_info.outputs.cmd }} -B -Dmaven.javadoc.skip=false verify
-          else
-            ${{ steps.java_info.outputs.cmd }} -B verify
-          fi
+        run: ${{ steps.java_info.outputs.cmd }} -B verify
 
       - name: "📦 Upload Build Artifact"
         if: inputs.release == true
