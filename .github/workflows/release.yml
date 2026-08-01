@@ -61,11 +61,13 @@ jobs:
         run: |
           set -eu
           if [ -z "${GH_TOKEN:-}" ]; then
+            printf 'enabled=false\n'
             printf 'enabled=false\n' >> "$GITHUB_OUTPUT"
             echo "BOT_TOKEN is not configured; weekly release is disabled."
             exit 0
           fi
 
+          printf 'enabled=true\n'
           printf 'enabled=true\n' >> "$GITHUB_OUTPUT"
           gh pr list --base main --state open --json number,headRefName,isDraft,mergeStateStatus \
             --jq '.[] | select(.isDraft == false) | select(.mergeStateStatus == "CLEAN") | select((.headRefName | startswith("dependabot/")) or (.headRefName | startswith("bot/maintenance-"))) | .number' \
@@ -152,14 +154,18 @@ jobs:
             dry_run_github_packages=true
           fi
 
+          ref=$(git rev-parse HEAD)
           {
             printf 'dry_run_central=%s\n' "$dry_run_central"
             printf 'dry_run_github_packages=%s\n' "$dry_run_github_packages"
-            printf 'ref=%s\n' "$(git rev-parse HEAD)"
+            printf 'ref=%s\n' "$ref"
             printf 'should_release=%s\n' "$should_release"
             printf 'version=%s\n' "$version"
           } >> "$GITHUB_OUTPUT"
 
+          printf 'dry_run_central=%s\n' "$dry_run_central"
+          printf 'dry_run_github_packages=%s\n' "$dry_run_github_packages"
+          printf 'ref=%s\n' "$ref"
           printf 'latest_tag=%s\n' "${latest_tag:-none}"
           printf 'has_material_changes=%s\n' "$has_material_changes"
           printf 'maven_central=%s\n' "$MAVEN_CENTRAL"
@@ -191,7 +197,6 @@ jobs:
     uses: ./.github/workflows/publish-central.yml
     with:
       dry_run: ${{ needs.plan.outputs.dry_run_central == 'true' }}
-      build_output_timestamp: ${{ needs.build.outputs.build_output_timestamp }}
     secrets: inherit
 
   publish-github-packages:
@@ -207,7 +212,6 @@ jobs:
     uses: ./.github/workflows/publish-github-packages.yml
     with:
       dry_run: ${{ needs.plan.outputs.dry_run_github_packages == 'true' }}
-      build_output_timestamp: ${{ needs.build.outputs.build_output_timestamp }}
 
   create-release:
     needs:

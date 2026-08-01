@@ -11,9 +11,6 @@ on:
         required: false
         default: false
         type: boolean
-      build_output_timestamp:
-        required: true
-        type: string
     secrets:
       CENTRAL_USER:
         required: true
@@ -34,10 +31,6 @@ on:
         required: true
         default: false
         type: boolean
-      build_output_timestamp:
-        description: Reproducible build output timestamp.
-        required: true
-        type: string
 
 permissions: {}
 
@@ -51,7 +44,6 @@ jobs:
     with:
       run_id: ${{ inputs.run_id }}
       dry_run: ${{ inputs.dry_run }}
-      build_output_timestamp: ${{ inputs.build_output_timestamp }}
     secrets:
       CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
       CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}

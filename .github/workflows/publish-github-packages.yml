@@ -11,9 +11,6 @@ on:
         required: false
         default: false
         type: boolean
-      build_output_timestamp:
-        required: true
-        type: string
   workflow_dispatch:
     inputs:
       run_id:
@@ -25,10 +22,6 @@ on:
         required: true
         default: false
         type: boolean
-      build_output_timestamp:
-        description: Reproducible build output timestamp.
-        required: true
-        type: string
 
 permissions: {}
 
@@ -43,4 +36,3 @@ jobs:
     with:
       run_id: ${{ inputs.run_id }}
       dry_run: ${{ inputs.dry_run }}
-      build_output_timestamp: ${{ inputs.build_output_timestamp }}

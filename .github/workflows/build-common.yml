@@ -19,9 +19,6 @@ on:
       commit_sha:
         description: Resolved commit SHA for this build.
         value: ${{ jobs.build.outputs.commit_sha }}
-      build_output_timestamp:
-        description: Reproducible build output timestamp.
-        value: ${{ jobs.build.outputs.build_output_timestamp }}
   workflow_dispatch:
     inputs:
       ref:
@@ -50,7 +47,6 @@ jobs:
       contents: read
     outputs:
       commit_sha: ${{ steps.commit_info.outputs.commit_sha }}
-      build_output_timestamp: ${{ steps.commit_info.outputs.build_output_timestamp }}
     steps:
       - name: "🧑‍💻 Checkout [${{ inputs.ref }}]"
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -63,8 +59,9 @@ jobs:
         shell: sh
         run: |
           set -eu
-          printf 'commit_sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          printf 'build_output_timestamp=%s\n' "$(git log -1 --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+          commit_sha=$(git rev-parse HEAD)
+          printf 'commit_sha=%s\n' "$commit_sha"
+          printf 'commit_sha=%s\n' "$commit_sha" >> "$GITHUB_OUTPUT"
 
       - name: "🔍 Read Java Info"
         id: java_info
@@ -77,8 +74,8 @@ jobs:
           java-version: ${{ steps.java_info.outputs.java_version }}
           cache: maven
 
-      - name: "🏷️ Read Project Version"
-        id: project_version
+      - name: "🧮 Resolve Version"
+        id: resolve_version
         env:
           RELEASE: ${{ inputs.release }}
           RELEASE_VERSION: ${{ inputs.version }}
@@ -88,32 +85,34 @@ jobs:
           if [ "$RELEASE" = "true" ]; then
             version="$RELEASE_VERSION"
           else
-            version=$(./mvnw -q -DforceStdout help:evaluate -Dexpression=project.version)
+            version=$(git log -1 --format=%cs HEAD | tr '-' '.')
           fi
-          test -n "$version"
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}$'; then
+            echo "Version must use YYYY.MM.DD, got: $version" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$version"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
-      - name: "🏷️ Set Project Version [${{ steps.project_version.outputs.version }}]"
+      - name: "🏷️ Set Project Version [${{ steps.resolve_version.outputs.version }}]"
         env:
-          BUILD_OUTPUT_TIMESTAMP: ${{ steps.commit_info.outputs.build_output_timestamp }}
-          RELEASE_VERSION: ${{ steps.project_version.outputs.version }}
+          RELEASE_VERSION: ${{ steps.resolve_version.outputs.version }}
         shell: sh
         run: |
           set -eu
           test -n "$RELEASE_VERSION"
-          ${{ steps.java_info.outputs.cmd }} -B -Dproject.build.outputTimestamp="$BUILD_OUTPUT_TIMESTAMP" versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false
+          ${{ steps.java_info.outputs.cmd }} -B versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false
 
       - name: "🧪 Build and Verify"
         env:
-          BUILD_OUTPUT_TIMESTAMP: ${{ steps.commit_info.outputs.build_output_timestamp }}
           RELEASE: ${{ inputs.release }}
         shell: sh
         run: |
           set -eu
           if [ "$RELEASE" = "true" ]; then
-            ${{ steps.java_info.outputs.cmd }} -B -Prelease -Dproject.build.outputTimestamp="$BUILD_OUTPUT_TIMESTAMP" -Dgpg.skip=true verify
+            ${{ steps.java_info.outputs.cmd }} -B -Prelease -Dgpg.skip=true verify
           else
-            ${{ steps.java_info.outputs.cmd }} -B -Dproject.build.outputTimestamp="$BUILD_OUTPUT_TIMESTAMP" verify
+            ${{ steps.java_info.outputs.cmd }} -B verify
           fi
 
       - name: "📦 Upload Build Artifact"
