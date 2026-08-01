@@ -26,6 +26,6 @@ jobs:
   verify:
     permissions:
       contents: read
-    uses: ./.github/workflows/build-common.yml
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_build_common.yml@feature/java-release-cicd-spike
     with:
       ref: ${{ inputs.ref || github.sha }}
