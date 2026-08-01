@@ -15,6 +15,9 @@ on:
       commit_sha:
         description: Commit SHA.
         value: ${{ jobs.build.outputs.commit_sha }}
+      version:
+        description: Version.
+        value: ${{ jobs.build.outputs.version }}
   workflow_dispatch:
     inputs:
       ref:
@@ -32,79 +35,9 @@ permissions: {}
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
     permissions:
       contents: read
-    outputs:
-      commit_sha: ${{ steps.commit_info.outputs.commit_sha }}
-    steps:
-      - name: "🧑‍💻 Checkout [${{ inputs.ref }}]"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.ref || github.sha }}
-
-      - name: "🧾 Read Commit"
-        id: commit_info
-        shell: sh
-        run: |
-          set -eu
-          commit_sha=$(git rev-parse HEAD)
-          version=$(git log -1 --format=%cs HEAD | tr '-' '.')
-          build_output_timestamp=$(git log -1 --format=%cI HEAD)
-          printf 'commit_sha=%s\n' "${commit_sha}"
-          printf 'version=%s\n' "${version}"
-          printf 'build_output_timestamp=%s\n' "${build_output_timestamp}"
-          {
-            printf 'commit_sha=%s\n' "${commit_sha}"
-            printf 'version=%s\n' "${version}"
-            printf 'build_output_timestamp=%s\n' "${build_output_timestamp}"
-          } >> "${GITHUB_OUTPUT}"
-
-      - name: "🔍 Read Java Info"
-        id: java_info
-        uses: YunaBraska/java-info-action@11a434ffbf6bb3357363d1933be71a4076a90a6b # v3
-
-      - name: "☕ Setup Java [${{ steps.java_info.outputs.java_version }}]"
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
-        with:
-          distribution: temurin
-          java-version: ${{ steps.java_info.outputs.java_version }}
-          cache: maven
-
-      - name: "🏷️ Set Project Version [${{ steps.commit_info.outputs.version }}]"
-        shell: sh
-        run: |
-          set -eu
-          ${{ steps.java_info.outputs.cmd }} -B versions:set -DnewVersion="${{ steps.commit_info.outputs.version }}" -DgenerateBackupPoms=false
-          ${{ steps.java_info.outputs.cmd }} -B versions:set-property -Dproperty=project.build.outputTimestamp -DnewVersion="${{ steps.commit_info.outputs.build_output_timestamp }}" -DgenerateBackupPoms=false
-
-      - name: "🧪 Build and Verify"
-        shell: sh
-        run: ${{ steps.java_info.outputs.cmd }} -B verify
-
-      - name: "📦 Upload Build Artifact"
-        if: inputs.release == true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: build-workspace
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 1
-          path: |
-            .mvn
-            mvnw
-            mvnw.cmd
-            pom.xml
-            target
-            !target/site
-            !target/site/**
-            !target/apidocs
-            !target/apidocs/**
-            !target/javadoc-bundle-options
-            !target/javadoc-bundle-options/**
-            !target/maven-javadoc-plugin-stale-data.txt
-            !target/jacoco.exec
-            !target/surefire-reports
-            !target/surefire-reports/**
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_build_common.yml@feature/java-release-cicd-spike
+    with:
+      ref: ${{ inputs.ref || github.sha }}
+      release: ${{ inputs.release }}
