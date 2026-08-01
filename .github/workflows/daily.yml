@@ -1,0 +1,20 @@
+name: Daily
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  snapshot:
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      packages: write
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_snapshot.yml@feature/java-release-cicd-spike
+    with:
+      github_packages: false
+      maven_central: false
+      version_source: date
+    secrets: inherit
