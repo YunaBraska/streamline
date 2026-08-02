@@ -30,7 +30,7 @@ jobs:
       contents: write
       deployments: write
       packages: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@34fa113361f06c1af745e67991b336e857f623c8
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@9e7f8d2fcc7ec7d419849bd0746329e59151c35e
     with:
       github_packages: ${{ github.event_name == 'push' && true || inputs.github_packages }}
       maven_central: ${{ github.event_name == 'push' && true || inputs.maven_central }}
