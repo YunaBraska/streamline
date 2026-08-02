@@ -1,0 +1,55 @@
+name: 🏷️ CD · Release
+
+on:
+  workflow_call:
+    inputs:
+      maven_central:
+        required: false
+        default: true
+        type: boolean
+      github_packages:
+        required: false
+        default: true
+        type: boolean
+      force:
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      maven_central:
+        description: Maven Central.
+        required: true
+        default: true
+        type: boolean
+      github_packages:
+        description: GitHub Packages.
+        required: true
+        default: true
+        type: boolean
+      force:
+        description: Force.
+        required: true
+        default: false
+        type: boolean
+
+permissions: {}
+
+jobs:
+  release:
+    permissions:
+      actions: read
+      contents: write
+      deployments: write
+      packages: write
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@84bd5a0a5c64172b357bc9929ff2b8d97f719d04
+    with:
+      force: ${{ inputs.force }}
+      github_packages: ${{ inputs.github_packages }}
+      maven_central: ${{ inputs.maven_central }}
+      version_source: date
+    secrets:
+      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
+      CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}

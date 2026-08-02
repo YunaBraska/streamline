@@ -1,0 +1,42 @@
+name: 🔄 CD · Snapshot
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      maven_central:
+        description: Maven Central.
+        required: true
+        default: true
+        type: boolean
+      github_packages:
+        description: GitHub Packages.
+        required: true
+        default: true
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: build-main-${{ github.ref || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      packages: write
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_snapshot.yml@500889119b97ea2fdea9c2d8b4419abab56c68d0
+    with:
+      github_packages: ${{ github.event_name == 'push' && true || inputs.github_packages }}
+      maven_central: ${{ github.event_name == 'push' && true || inputs.maven_central }}
+      version_source: date
+    secrets:
+      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
+      CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
