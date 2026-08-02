@@ -27,7 +27,7 @@ jobs:
   snapshot:
     permissions:
       actions: read
-      contents: read
+      contents: write
       deployments: write
       packages: write
     uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@ed9a483f99cd2f25bde5f69c926ef956a4b7818b
