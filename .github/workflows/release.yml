@@ -42,7 +42,7 @@ jobs:
       contents: write
       deployments: write
       packages: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@9e7f8d2fcc7ec7d419849bd0746329e59151c35e
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@b0d893b4767e7652b42a33ce007e3dacb821ce5a
     with:
       force: ${{ inputs.force }}
       github_packages: ${{ inputs.github_packages }}
