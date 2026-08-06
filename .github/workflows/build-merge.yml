@@ -24,20 +24,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  snapshot:
+  release:
+    permissions:
+      contents: read
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@2336e7ab015a92b1effe885212f25b07f8581ba7
+    with:
+      semver_strategy: snapshot
+
+  central:
+    needs:
+      - release
+    if: ${{ always() && !cancelled() && needs.release.result == 'success' }}
     permissions:
       actions: read
-      contents: write
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/publish-central.yml
+    with:
+      dry_run: ${{ (github.event_name != 'push' && inputs.maven_central != true) || needs.release.outputs.dry_run == 'true' }}
+    secrets:
+      CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
+      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
+      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+  packages:
+    needs:
+      - release
+    if: ${{ always() && !cancelled() && needs.release.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
       deployments: write
       packages: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@f3ced49a6c7188d86778f332998af4049b141524
+    uses: ./.github/workflows/publish-github-packages.yml
     with:
-      github_packages: ${{ github.event_name == 'push' && true || inputs.github_packages }}
-      maven_central: ${{ github.event_name == 'push' && true || inputs.maven_central }}
-      release_strategy: snapshot
-      version_source: date
-    secrets:
-      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
-      CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
-      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+      dry_run: ${{ (github.event_name != 'push' && inputs.github_packages != true) || needs.release.outputs.dry_run == 'true' }}

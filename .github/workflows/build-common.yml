@@ -4,10 +4,12 @@ on:
   workflow_call:
     inputs:
       ref:
+        description: Checkout ref.
         required: false
         default: ''
         type: string
       upload_artifact:
+        description: Upload build workspace.
         required: false
         default: false
         type: boolean
@@ -37,7 +39,7 @@ jobs:
   build:
     permissions:
       contents: read
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_build_common.yml@df93fbaf3b2026272d2eff4a1794ec175f99d466
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_build_common.yml@2336e7ab015a92b1effe885212f25b07f8581ba7
     with:
       ref: ${{ inputs.ref || github.sha }}
       upload_artifact: ${{ inputs.upload_artifact }}

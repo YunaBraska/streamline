@@ -4,10 +4,12 @@ on:
   workflow_call:
     inputs:
       run_id:
+        description: Build run.
         required: false
         default: ''
         type: string
       dry_run:
+        description: Validate without deploy.
         required: false
         default: false
         type: boolean
@@ -32,7 +34,7 @@ jobs:
       contents: read
       deployments: write
       packages: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_github_packages.yml@df93fbaf3b2026272d2eff4a1794ec175f99d466
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_github_packages.yml@2336e7ab015a92b1effe885212f25b07f8581ba7
     with:
       run_id: ${{ inputs.run_id }}
       dry_run: ${{ inputs.dry_run }}

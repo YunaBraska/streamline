@@ -4,14 +4,17 @@ on:
   workflow_call:
     inputs:
       maven_central:
+        description: Maven Central.
         required: false
         default: true
         type: boolean
       github_packages:
+        description: GitHub Packages.
         required: false
         default: true
         type: boolean
       force:
+        description: Publish unchanged source.
         required: false
         default: false
         type: boolean
@@ -38,17 +41,51 @@ permissions: {}
 jobs:
   release:
     permissions:
-      actions: read
-      contents: write
-      deployments: write
-      packages: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@df93fbaf3b2026272d2eff4a1794ec175f99d466
+      contents: read
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@2336e7ab015a92b1effe885212f25b07f8581ba7
     with:
       force: ${{ inputs.force }}
-      github_packages: ${{ inputs.github_packages }}
-      maven_central: ${{ inputs.maven_central }}
+
+  central:
+    needs:
+      - release
+    if: ${{ always() && !cancelled() && needs.release.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/publish-central.yml
+    with:
+      dry_run: ${{ inputs.maven_central != true || needs.release.outputs.dry_run == 'true' }}
     secrets:
-      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
       CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
-      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
       GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+  packages:
+    needs:
+      - release
+    if: ${{ always() && !cancelled() && needs.release.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      packages: write
+    uses: ./.github/workflows/publish-github-packages.yml
+    with:
+      dry_run: ${{ inputs.github_packages != true || needs.release.outputs.dry_run == 'true' }}
+
+  github:
+    needs:
+      - release
+      - central
+      - packages
+    if: ${{ always() && !cancelled() && needs.release.outputs.dry_run == 'false' && !endsWith(needs.release.outputs.version, '-SNAPSHOT') && needs.release.result == 'success' && needs.central.result == 'success' && needs.packages.result == 'success' }}
+    permissions:
+      actions: read
+      contents: write
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_create_github_release.yml@2336e7ab015a92b1effe885212f25b07f8581ba7
+    with:
+      commit_sha: ${{ needs.release.outputs.commit_sha }}
+      version: ${{ needs.release.outputs.version }}
