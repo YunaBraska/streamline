@@ -34,7 +34,7 @@ jobs:
       contents: read
       deployments: write
       packages: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_github_packages.yml@2336e7ab015a92b1effe885212f25b07f8581ba7
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_github_packages.yml@2a85cb9f1adf681086cff8d14427c898ca2e923a
     with:
       run_id: ${{ inputs.run_id }}
       dry_run: ${{ inputs.dry_run }}

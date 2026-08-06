@@ -27,7 +27,7 @@ jobs:
   release:
     permissions:
       contents: read
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@2336e7ab015a92b1effe885212f25b07f8581ba7
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@2a85cb9f1adf681086cff8d14427c898ca2e923a
     with:
       semver_strategy: snapshot
 
