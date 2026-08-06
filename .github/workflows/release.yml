@@ -42,12 +42,11 @@ jobs:
       contents: write
       deployments: write
       packages: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@f3ced49a6c7188d86778f332998af4049b141524
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@df93fbaf3b2026272d2eff4a1794ec175f99d466
     with:
       force: ${{ inputs.force }}
       github_packages: ${{ inputs.github_packages }}
       maven_central: ${{ inputs.maven_central }}
-      version_source: date
     secrets:
       CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
       CENTRAL_USER: ${{ secrets.CENTRAL_USER }}

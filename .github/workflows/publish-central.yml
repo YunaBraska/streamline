@@ -40,7 +40,7 @@ jobs:
       actions: read
       contents: read
       deployments: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_central.yml@500889119b97ea2fdea9c2d8b4419abab56c68d0
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_central.yml@df93fbaf3b2026272d2eff4a1794ec175f99d466
     with:
       run_id: ${{ inputs.run_id }}
       dry_run: ${{ inputs.dry_run }}

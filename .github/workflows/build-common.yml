@@ -7,7 +7,7 @@ on:
         required: false
         default: ''
         type: string
-      release:
+      upload_artifact:
         required: false
         default: false
         type: boolean
@@ -25,8 +25,8 @@ on:
         required: false
         default: ''
         type: string
-      release:
-        description: Release.
+      upload_artifact:
+        description: Upload artifact.
         required: true
         default: false
         type: boolean
@@ -37,7 +37,7 @@ jobs:
   build:
     permissions:
       contents: read
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_build_common.yml@500889119b97ea2fdea9c2d8b4419abab56c68d0
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_build_common.yml@df93fbaf3b2026272d2eff4a1794ec175f99d466
     with:
       ref: ${{ inputs.ref || github.sha }}
-      release: ${{ inputs.release }}
+      upload_artifact: ${{ inputs.upload_artifact }}
