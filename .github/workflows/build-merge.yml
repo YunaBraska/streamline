@@ -39,7 +39,7 @@ jobs:
       actions: read
       contents: read
       deployments: write
-    uses: ./.github/workflows/publish-central.yml
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_central.yml@7c007762613a9770e3271902fea20d12fa68d1bf
     with:
       dry_run: ${{ (github.event_name != 'push' && inputs.maven_central != true) || needs.release.outputs.dry_run == 'true' }}
     secrets:
@@ -57,6 +57,6 @@ jobs:
       contents: read
       deployments: write
       packages: write
-    uses: ./.github/workflows/publish-github-packages.yml
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_github_packages.yml@7c007762613a9770e3271902fea20d12fa68d1bf
     with:
       dry_run: ${{ (github.event_name != 'push' && inputs.github_packages != true) || needs.release.outputs.dry_run == 'true' }}
