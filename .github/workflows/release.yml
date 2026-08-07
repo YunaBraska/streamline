@@ -1,17 +1,21 @@
+# yuna-java-release: true
 name: 🏷️ CD · Release
 
 on:
   workflow_call:
     inputs:
       maven_central:
+        description: Maven Central.
         required: false
         default: true
         type: boolean
       github_packages:
+        description: GitHub Packages.
         required: false
         default: true
         type: boolean
       force:
+        description: Publish unchanged source.
         required: false
         default: false
         type: boolean
@@ -38,18 +42,51 @@ permissions: {}
 jobs:
   release:
     permissions:
-      actions: read
-      contents: write
-      deployments: write
-      packages: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@84bd5a0a5c64172b357bc9929ff2b8d97f719d04
+      contents: read
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@2a85cb9f1adf681086cff8d14427c898ca2e923a
     with:
       force: ${{ inputs.force }}
-      github_packages: ${{ inputs.github_packages }}
-      maven_central: ${{ inputs.maven_central }}
-      version_source: date
+
+  central:
+    needs:
+      - release
+    if: ${{ always() && !cancelled() && needs.release.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/publish-central.yml
+    with:
+      dry_run: ${{ inputs.maven_central != true || needs.release.outputs.dry_run == 'true' }}
     secrets:
-      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
       CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
-      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
       GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+  packages:
+    needs:
+      - release
+    if: ${{ always() && !cancelled() && needs.release.result == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      packages: write
+    uses: ./.github/workflows/publish-github-packages.yml
+    with:
+      dry_run: ${{ inputs.github_packages != true || needs.release.outputs.dry_run == 'true' }}
+
+  github:
+    needs:
+      - release
+      - central
+      - packages
+    if: ${{ always() && !cancelled() && needs.release.outputs.dry_run == 'false' && !endsWith(needs.release.outputs.version, '-SNAPSHOT') && needs.release.result == 'success' && needs.central.result == 'success' && needs.packages.result == 'success' }}
+    permissions:
+      actions: read
+      contents: write
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_create_github_release.yml@2a85cb9f1adf681086cff8d14427c898ca2e923a
+    with:
+      commit_sha: ${{ needs.release.outputs.commit_sha }}
+      version: ${{ needs.release.outputs.version }}
