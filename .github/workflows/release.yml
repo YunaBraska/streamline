@@ -2,23 +2,6 @@
 name: 🏷️ CD · Release
 
 on:
-  workflow_call:
-    inputs:
-      maven_central:
-        description: Maven Central.
-        required: false
-        default: true
-        type: boolean
-      github_packages:
-        description: GitHub Packages.
-        required: false
-        default: true
-        type: boolean
-      force:
-        description: Publish unchanged source.
-        required: false
-        default: false
-        type: boolean
   workflow_dispatch:
     inputs:
       maven_central:
@@ -43,9 +26,10 @@ jobs:
   release:
     permissions:
       contents: read
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@e5882579725bccd1b0b145e52c664e3195d9df08
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@c7dc8697c1a1f473efa814cb7718aa7d45795ba8
     with:
       force: ${{ inputs.force }}
+      dry_run: ${{ inputs.maven_central != true || inputs.github_packages != true }}
 
   central:
     needs:
@@ -55,9 +39,7 @@ jobs:
       actions: read
       contents: read
       deployments: write
-    uses: ./.github/workflows/publish-central.yml
-    with:
-      dry_run: ${{ inputs.maven_central != true || needs.release.outputs.dry_run == 'true' }}
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_central.yml@c7dc8697c1a1f473efa814cb7718aa7d45795ba8
     secrets:
       CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
       CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
@@ -73,9 +55,7 @@ jobs:
       contents: read
       deployments: write
       packages: write
-    uses: ./.github/workflows/publish-github-packages.yml
-    with:
-      dry_run: ${{ inputs.github_packages != true || needs.release.outputs.dry_run == 'true' }}
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_github_packages.yml@c7dc8697c1a1f473efa814cb7718aa7d45795ba8
 
   github:
     needs:
@@ -86,7 +66,7 @@ jobs:
     permissions:
       actions: read
       contents: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_create_github_release.yml@e5882579725bccd1b0b145e52c664e3195d9df08
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_create_github_release.yml@c7dc8697c1a1f473efa814cb7718aa7d45795ba8
     with:
       commit_sha: ${{ needs.release.outputs.commit_sha }}
       version: ${{ needs.release.outputs.version }}
