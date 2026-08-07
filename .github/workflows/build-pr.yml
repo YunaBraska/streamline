@@ -26,6 +26,6 @@ jobs:
   build:
     permissions:
       contents: read
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_build_common.yml@2a85cb9f1adf681086cff8d14427c898ca2e923a
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_build_common.yml@e5882579725bccd1b0b145e52c664e3195d9df08
     with:
       ref: ${{ inputs.ref || github.sha }}
