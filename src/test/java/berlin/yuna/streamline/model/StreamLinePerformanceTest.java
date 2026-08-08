@@ -117,7 +117,7 @@ class StreamLinePerformanceTest {
 
     private static void runMaterializedCountWorkload() {
         assertThat(StreamLine.range(0, LIGHTWEIGHT_SIZE)
-            .threads(-1)
+            .threads(1)
             .chunks(-1)
             .map(value -> value + 1)
             .filter(value -> value % 2 == 0)
@@ -126,7 +126,7 @@ class StreamLinePerformanceTest {
 
     private static void runFusedCountWorkload() {
         assertThat(StreamLine.range(0, LIGHTWEIGHT_SIZE)
-            .threads(-1)
+            .threads(1)
             .chunks(-1)
             .map(value -> value + 1)
             .filter(value -> value % 2 == 0)
