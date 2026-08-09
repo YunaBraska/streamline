@@ -26,7 +26,7 @@ jobs:
   release:
     permissions:
       contents: read
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@6da5dd7ce18e43cd1de0aa721037b0da1a9d28cd
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_release.yml@c5af554b4e859b238b7b65f9865bb84b51f7db54
     with:
       force: ${{ inputs.force }}
       dry_run: ${{ inputs.maven_central != true || inputs.github_packages != true }}
@@ -39,7 +39,7 @@ jobs:
       actions: read
       contents: read
       deployments: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_central.yml@6da5dd7ce18e43cd1de0aa721037b0da1a9d28cd
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_central.yml@c5af554b4e859b238b7b65f9865bb84b51f7db54
     secrets:
       CENTRAL_USER: ${{ secrets.CENTRAL_USER }}
       CENTRAL_PASS: ${{ secrets.CENTRAL_PASS }}
@@ -55,7 +55,7 @@ jobs:
       contents: read
       deployments: write
       packages: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_github_packages.yml@6da5dd7ce18e43cd1de0aa721037b0da1a9d28cd
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_publish_github_packages.yml@c5af554b4e859b238b7b65f9865bb84b51f7db54
 
   github:
     needs:
@@ -66,7 +66,7 @@ jobs:
     permissions:
       actions: read
       contents: write
-    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_create_github_release.yml@6da5dd7ce18e43cd1de0aa721037b0da1a9d28cd
+    uses: YunaBraska/YunaBraska/.github/workflows/wc_java_create_github_release.yml@c5af554b4e859b238b7b65f9865bb84b51f7db54
     with:
       commit_sha: ${{ needs.release.outputs.commit_sha }}
       version: ${{ needs.release.outputs.version }}
